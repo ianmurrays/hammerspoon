@@ -1,5 +1,11 @@
 -- Scratchpad Module for Hammerspoon
--- A simple textarea that syncs to iCloud
+-- A simple textarea that syncs to iCloud with E2E encryption
+--
+-- To copy the encryption key to another Mac:
+-- 1. Run: security find-generic-password -a "hammerspoon" -s "scratchpad-encryption-key" -w
+-- 2. Copy the output
+-- 3. On the other Mac, run:
+--    security add-generic-password -a "hammerspoon" -s "scratchpad-encryption-key" -w "PASTE_KEY_HERE"
 
 local M = {}
 
@@ -10,6 +16,73 @@ local hotkey = nil
 local config = {}
 local isVisible = false
 local isTransitioning = false
+
+-- Keychain constants
+local KEYCHAIN_ACCOUNT = "hammerspoon"
+local KEYCHAIN_SERVICE = "scratchpad-encryption-key"
+
+local function getEncryptionKey()
+    local cmd = string.format(
+        'security find-generic-password -a "%s" -s "%s" -w 2>/dev/null',
+        KEYCHAIN_ACCOUNT, KEYCHAIN_SERVICE
+    )
+    local output, status = hs.execute(cmd)
+    if status and output and #output > 0 then
+        return output:gsub("%s+$", "")
+    end
+    return nil
+end
+
+local function createEncryptionKey()
+    local genCmd = "openssl rand -base64 32"
+    local key, genStatus = hs.execute(genCmd)
+    if not genStatus or not key then
+        return nil, "Failed to generate key"
+    end
+    key = key:gsub("%s+$", "")
+
+    local storeCmd = string.format(
+        'security add-generic-password -a "%s" -s "%s" -w "%s"',
+        KEYCHAIN_ACCOUNT, KEYCHAIN_SERVICE, key
+    )
+    local _, storeStatus = hs.execute(storeCmd)
+    if not storeStatus then
+        return nil, "Failed to store key in Keychain"
+    end
+
+    return key
+end
+
+-- Encryption helpers
+
+local function encrypt(plaintext, key)
+    local encoded = hs.base64.encode(plaintext)
+    local cmd = string.format(
+        'echo "%s" | base64 -d | openssl enc -aes-256-cbc -pbkdf2 -salt -pass pass:%s -base64',
+        encoded, key
+    )
+    local output, status = hs.execute(cmd)
+    if status and output then
+        return output:gsub("%s+$", "")
+    end
+    return nil
+end
+
+local function decrypt(ciphertext, key)
+    local cmd = string.format(
+        'echo "%s" | openssl enc -aes-256-cbc -pbkdf2 -d -pass pass:%s -base64 2>/dev/null',
+        ciphertext:gsub("%s+$", ""), key
+    )
+    local output, status = hs.execute(cmd)
+    if status and output then
+        return output
+    end
+    return nil
+end
+
+local function isEncrypted(content)
+    return content:match("^U2FsdGVk")
+end
 
 -- File I/O
 
@@ -28,16 +101,88 @@ local function readFile()
     end
     local content = f:read("*a")
     f:close()
-    return content or ""
+
+    if not content or content == "" then
+        return ""
+    end
+
+    if isEncrypted(content) then
+        -- Encrypted file: MUST have key, error if missing
+        local key = getEncryptionKey()
+        if not key then
+            hs.notify.new({
+                title = "Scratchpad",
+                informativeText = "Encryption key not found in Keychain. Import the key first.",
+                withdrawAfter = 10
+            }):send()
+            return nil  -- Signal error to caller
+        end
+
+        local decrypted = decrypt(content, key)
+        if decrypted then
+            return decrypted
+        else
+            hs.notify.new({
+                title = "Scratchpad",
+                informativeText = "Decryption failed - wrong key or corrupted file",
+                withdrawAfter = 5
+            }):send()
+            return nil
+        end
+    else
+        -- Plaintext file (migration): will be encrypted on save
+        return content
+    end
 end
 
 local function saveFile(content)
     ensureDirectory()
+
+    -- Check if existing file is encrypted
+    local existingFile = io.open(config.filePath, "r")
+    local existingContent = existingFile and existingFile:read("*a") or ""
+    if existingFile then existingFile:close() end
+
+    local key = getEncryptionKey()
+
+    -- If encrypted file exists but no key, refuse to overwrite
+    if isEncrypted(existingContent) and not key then
+        hs.notify.new({
+            title = "Scratchpad",
+            informativeText = "Cannot save: encryption key not found. Import the key first.",
+            withdrawAfter = 10
+        }):send()
+        return false
+    end
+
+    -- Create key if needed (new file or plaintext migration)
+    if not key then
+        key = createEncryptionKey()
+        if not key then
+            hs.notify.new({
+                title = "Scratchpad",
+                informativeText = "Failed to create encryption key",
+                withdrawAfter = 5
+            }):send()
+            return false
+        end
+    end
+
+    local encrypted = encrypt(content or "", key)
+    if not encrypted then
+        hs.notify.new({
+            title = "Scratchpad",
+            informativeText = "Encryption failed",
+            withdrawAfter = 5
+        }):send()
+        return false
+    end
+
     local f = io.open(config.filePath, "w")
     if f then
-        f:write(content or "")
+        f:write(encrypted)
         f:close()
-        print("Scratchpad saved")
+        print("Scratchpad saved (encrypted)")
         return true
     end
     print("Scratchpad: Failed to save file")
@@ -185,6 +330,11 @@ local function showWebview()
 
     -- Load current content
     local content = readFile()
+    if content == nil then
+        -- Decryption failed, don't show webview
+        print("Scratchpad: cannot open - decryption failed")
+        return
+    end
     webview:html(buildHTML(content))
     webview:show()
     webview:hswindow():focus()
