@@ -1,7 +1,7 @@
 -- Hammerspoon Configuration
--- Load and configure the Slack Status Updater module
 
 local slackStatus = require("slack_status")
+local scratchpad = require("scratchpad")
 
 -- Read Slack token from macOS Keychain
 -- One-time setup: security add-generic-password -a "$USER" -s "slack-status-token" -w "xoxp-your-token-here"
@@ -97,3 +97,6 @@ slackStatus.init({
     -- Auto-refresh configuration (status expires after this interval, then gets refreshed)
     refreshInterval = 5 * 60 - 10,  -- 5 minutes - 10 seconds in seconds, so we refresh before the status expires
 })
+
+-- Initialize Scratchpad (Ctrl+Option+S to toggle)
+scratchpad.init({})
