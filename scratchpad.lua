@@ -52,59 +52,62 @@ end
 -- HTML template
 
 local function buildHTML(content)
-    -- Only escape closing textarea tag to prevent breaking out of the element
-    local escaped = content:gsub("</textarea>", "&lt;/textarea&gt;")
+    -- Escape backslashes and backticks for JavaScript string embedding
+    local escaped = content:gsub("\\", "\\\\"):gsub("`", "\\`"):gsub("${", "\\${")
 
     return [[
 <!DOCTYPE html>
 <html>
 <head>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-darker.min.css">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-      background: #1e1e1e;
-      padding: 16px;
-    }
-    textarea {
-      width: 100%;
-      height: calc(100vh - 32px);
-      border: none;
-      outline: none;
-      resize: none;
+    body { background: #212121; padding: 8px; height: 100vh; }
+    .CodeMirror {
+      height: calc(100vh - 16px);
+      font-family: 'SF Mono', Menlo, Monaco, monospace;
       font-size: 14px;
       line-height: 1.5;
-      font-family: 'SF Mono', Menlo, Monaco, monospace;
-      background: #1e1e1e;
-      color: #d4d4d4;
-      padding: 8px;
       border-radius: 4px;
     }
-    textarea::placeholder { color: #666; }
   </style>
 </head>
 <body>
-  <textarea id="content" placeholder="Type here..." autofocus>]] .. escaped .. [[</textarea>
+  <textarea id="content"></textarea>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/markdown/markdown.min.js"></script>
   <script>
-    const textarea = document.getElementById('content');
+    const initialContent = `]] .. escaped .. [[`;
+    const editor = CodeMirror.fromTextArea(document.getElementById('content'), {
+      mode: 'markdown',
+      theme: 'material-darker',
+      lineWrapping: true,
+      autofocus: true,
+      lineNumbers: false,
+      viewportMargin: Infinity
+    });
+    editor.setValue(initialContent);
+
+    // Expose getValue for Lua callbacks
+    window.getEditorValue = () => editor.getValue();
 
     function save(andClose) {
       window.webkit.messageHandlers.scratchpad.postMessage({
         action: andClose ? 'save_and_close' : 'save',
-        content: textarea.value
+        content: editor.getValue()
       });
     }
 
     // Save on blur
-    textarea.addEventListener('blur', () => save(false));
+    editor.on('blur', () => save(false));
 
-    // Escape to save and close
+    // Escape to save and close, Cmd+S to save
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         e.preventDefault();
         save(true);
       }
-      // Cmd+S to save
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
         e.preventDefault();
         save(false);
@@ -139,8 +142,8 @@ local function showWebview()
                 end
             end)
 
-        -- Get screen dimensions for centering
-        local screen = hs.screen.mainScreen():frame()
+        -- Get screen dimensions for centering (use screen where mouse cursor is)
+        local screen = hs.mouse.getCurrentScreen():frame()
         local width = 600
         local height = 400
         local rect = {
@@ -159,7 +162,7 @@ local function showWebview()
                 if action == "closing" then
                     -- Save before hiding
                     webview:evaluateJavaScript(
-                        "document.getElementById('content').value",
+                        "window.getEditorValue ? window.getEditorValue() : ''",
                         function(result, error)
                             if result then saveFile(result) end
                         end
@@ -168,6 +171,17 @@ local function showWebview()
                 end
             end)
     end
+
+    -- Reposition to cursor's screen each time
+    local screen = hs.mouse.getCurrentScreen():frame()
+    local width = 600
+    local height = 400
+    webview:frame({
+        x = screen.x + (screen.w - width) / 2,
+        y = screen.y + (screen.h - height) / 2,
+        w = width,
+        h = height
+    })
 
     -- Load current content
     local content = readFile()
@@ -185,7 +199,7 @@ local function toggleWebview()
         isTransitioning = true
         if webview then
             webview:evaluateJavaScript(
-                "document.getElementById('content').value",
+                "window.getEditorValue ? window.getEditorValue() : ''",
                 function(result, error)
                     if result then saveFile(result) end
                     hideWebview()
