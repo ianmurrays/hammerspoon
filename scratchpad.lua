@@ -91,6 +91,29 @@ local function ensureDirectory()
     hs.fs.mkdir(dir)
 end
 
+local function checkForConflicts()
+    local dir = config.filePath:match("(.+)/[^/]+$")
+    local basename = config.filePath:match("([^/]+)$"):match("(.+)%..+$")  -- "scratchpad"
+
+    local conflicts = {}
+    for file in hs.fs.dir(dir) do
+        -- Match patterns like "scratchpad 2.txt", "scratchpad (1).txt"
+        if file:match("^" .. basename .. " %d+%.") or file:match("^" .. basename .. " %(") then
+            table.insert(conflicts, file)
+        end
+    end
+
+    if #conflicts > 0 then
+        hs.notify.new({
+            title = "Scratchpad",
+            informativeText = "iCloud conflict detected: " .. table.concat(conflicts, ", "),
+            withdrawAfter = 15
+        }):send()
+        return true
+    end
+    return false
+end
+
 local function readFile()
     local f = io.open(config.filePath, "r")
     if not f then
@@ -327,6 +350,9 @@ local function showWebview()
         w = width,
         h = height
     })
+
+    -- Check for iCloud conflicts
+    checkForConflicts()
 
     -- Load current content
     local content = readFile()
