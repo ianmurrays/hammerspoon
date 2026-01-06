@@ -2,9 +2,11 @@
 -- Monitors an iCloud file for URLs and opens them in the default browser
 --
 -- Setup:
--- 1. Create an iPhone Shortcut that appends URLs to:
+-- 1. Create an iPhone Shortcut that appends timestamped URLs to:
 --    ~/Library/Mobile Documents/com~apple~CloudDocs/Hyperduck/inbox.txt
+--    Format: timestamp|url (e.g., 1736172000|https://example.com)
 -- 2. This module monitors that file and opens new URLs automatically
+-- 3. URLs older than purgeAfterDays (default 7) are automatically removed
 
 local M = {}
 
@@ -48,35 +50,87 @@ local function ensureDirectory()
     hs.fs.mkdir(paths.base)
 end
 
--- Read file into array of lines
-local function readLines(filePath)
-    local lines = {}
+-- Parse timestamp|url format, returns {timestamp, url} or nil
+local function parseEntry(line)
+    local trimmed = line:gsub("^%s+", ""):gsub("%s+$", "")
+    if trimmed == "" then
+        return nil
+    end
+
+    local timestamp, url = trimmed:match("^(%d+)|(.+)$")
+    if timestamp and url then
+        return { timestamp = tonumber(timestamp), url = url }
+    end
+
+    -- Backward compat: plain URL without timestamp (treat as old)
+    if trimmed:match("^https?://") or trimmed:match("^file://") then
+        return { timestamp = 0, url = trimmed }
+    end
+
+    return nil
+end
+
+-- Read file into array of {timestamp, url} entries
+local function readEntries(filePath)
+    local entries = {}
     local f = io.open(filePath, "r")
     if not f then
-        return lines
+        return entries
     end
 
     for line in f:lines() do
-        local trimmed = line:gsub("^%s+", ""):gsub("%s+$", "")
-        if trimmed ~= "" then
-            table.insert(lines, trimmed)
+        local entry = parseEntry(line)
+        if entry then
+            table.insert(entries, entry)
         end
     end
     f:close()
-    return lines
+    return entries
 end
 
--- Append line to file
-local function appendToFile(filePath, line)
+-- Append timestamped entry to file
+local function appendEntry(filePath, url)
     ensureDirectory()
     local f = io.open(filePath, "a")
     if not f then
         print("Hyperduck: Failed to open file for writing: " .. filePath)
         return false
     end
-    f:write(line .. "\n")
+    local timestamp = os.time()
+    f:write(timestamp .. "|" .. url .. "\n")
     f:close()
     return true
+end
+
+-- Purge entries older than maxAgeDays from file
+local function purgeOldEntries(filePath, maxAgeDays)
+    local entries = readEntries(filePath)
+    if #entries == 0 then
+        return
+    end
+
+    local cutoff = os.time() - (maxAgeDays * 24 * 60 * 60)
+    local kept = {}
+    local purged = 0
+
+    for _, entry in ipairs(entries) do
+        if entry.timestamp >= cutoff then
+            table.insert(kept, entry)
+        else
+            purged = purged + 1
+        end
+    end
+
+    if purged > 0 then
+        local f = io.open(filePath, "w")
+        if f then
+            for _, entry in ipairs(kept) do
+                f:write(entry.timestamp .. "|" .. entry.url .. "\n")
+            end
+            f:close()
+            print("Hyperduck: Purged " .. purged .. " old entries from " .. filePath)
+        end
+    end
 end
 
 -- Check if string looks like a URL
@@ -124,38 +178,48 @@ local function updateMenuBar()
     end
 end
 
+-- Purge old entries from both files
+local function purgeFiles()
+    local maxAgeDays = config.purgeAfterDays or 7
+    purgeOldEntries(paths.inbox, maxAgeDays)
+    purgeOldEntries(paths.processed, maxAgeDays)
+end
+
 -- Process inbox and open new URLs
 local function processInbox()
-    local inboxUrls = readLines(paths.inbox)
-    local processedUrls = readLines(paths.processed)
+    -- Purge old entries first
+    purgeFiles()
 
-    -- Create lookup table for processed URLs
+    local inboxEntries = readEntries(paths.inbox)
+    local processedEntries = readEntries(paths.processed)
+
+    -- Create lookup table for processed URLs (by URL, ignoring timestamp)
     local processed = {}
-    for _, url in ipairs(processedUrls) do
-        processed[url] = true
+    for _, entry in ipairs(processedEntries) do
+        processed[entry.url] = true
     end
 
     -- Find and open new URLs
     local newCount = 0
-    for _, url in ipairs(inboxUrls) do
-        if not processed[url] then
-            if isValidUrl(url) then
-                print("Hyperduck: Opening " .. url)
-                hs.urlevent.openURL(url)
-                appendToFile(paths.processed, url)
-                addToRecent(url)
+    for _, entry in ipairs(inboxEntries) do
+        if not processed[entry.url] then
+            if isValidUrl(entry.url) then
+                print("Hyperduck: Opening " .. entry.url)
+                hs.urlevent.openURL(entry.url)
+                appendEntry(paths.processed, entry.url)
+                addToRecent(entry.url)
 
                 hs.notify.new({
                     title = "Hyperduck",
-                    informativeText = url,
+                    informativeText = entry.url,
                     withdrawAfter = 3
                 }):send()
 
                 newCount = newCount + 1
             else
-                print("Hyperduck: Skipping invalid URL: " .. url)
+                print("Hyperduck: Skipping invalid URL: " .. entry.url)
                 -- Still mark as processed to avoid repeated warnings
-                appendToFile(paths.processed, url)
+                appendEntry(paths.processed, entry.url)
             end
         end
     end
@@ -191,6 +255,7 @@ function M.init(cfg)
 
     print("Hyperduck: Machine ID is " .. machineId)
     print("Hyperduck: Monitoring " .. paths.inbox)
+    print("Hyperduck: Purging entries older than " .. (config.purgeAfterDays or 7) .. " days")
 
     -- Ensure directory and inbox file exist
     ensureDirectory()
