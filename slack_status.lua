@@ -12,8 +12,8 @@ local manualStatusActive = false
 local wifiChangeTimer = nil
 local statusRefreshTimer = nil
 local currentStatusEmoji = "💬"
-local statusMenu = nil
 local wifiWatcher = nil
+local updateCallback = nil
 
 -- ============================================
 -- HELPER FUNCTIONS
@@ -217,9 +217,8 @@ local function buildMenu()
 end
 
 updateMenuBar = function()
-    if statusMenu then
-        statusMenu:setTitle(currentStatusEmoji)
-        statusMenu:setMenu(buildMenu)
+    if updateCallback then
+        updateCallback()
     end
 end
 
@@ -314,10 +313,6 @@ function M.init(cfg)
         print("Location services started - this enables WiFi detection")
     end
 
-    -- Set up menu bar
-    statusMenu = hs.menubar.new()
-    updateMenuBar()
-
     -- Create and start the WiFi watcher
     wifiWatcher = hs.wifi.watcher.new(wifiChanged)
     wifiWatcher:start()
@@ -345,13 +340,23 @@ function M.stop()
         wifiWatcher = nil
     end
 
-    -- Remove menu bar
-    if statusMenu then
-        statusMenu:delete()
-        statusMenu = nil
-    end
+    updateCallback = nil
 
     print("Slack Status Updater stopped")
+end
+
+-- Functions for unified menu integration
+
+function M.getMenuItems()
+    return buildMenu()
+end
+
+function M.getCurrentEmoji()
+    return currentStatusEmoji
+end
+
+function M.setUpdateCallback(fn)
+    updateCallback = fn
 end
 
 return M

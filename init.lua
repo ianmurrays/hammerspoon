@@ -5,6 +5,7 @@ local scratchpad = require("scratchpad")
 local batteryIndicator = require("battery_indicator")
 local hyperduck = require("hyperduck")
 local windowManager = require("window_manager")
+local unifiedMenu = require("unified_menu")
 
 -- Read Slack token from macOS Keychain
 -- One-time setup: security add-generic-password -a "$USER" -s "slack-status-token" -w "xoxp-your-token-here"
@@ -112,3 +113,10 @@ hyperduck.init({})
 
 -- Initialize Window Manager (Rectangle-style shortcuts)
 windowManager.init({})
+
+-- Initialize Unified Menu (combines Slack Status, Hyperduck, Scratchpad)
+unifiedMenu.init({
+    slackStatus = slackStatus,
+    hyperduck = hyperduck,
+    scratchpad = scratchpad
+})

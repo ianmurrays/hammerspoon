@@ -410,11 +410,6 @@ function M.init(cfg)
     config.filePath = cfg.filePath or (os.getenv("HOME") .. "/Library/Mobile Documents/com~apple~CloudDocs/Scratchpad/scratchpad.txt")
     config.hotkey = cfg.hotkey or { {"ctrl", "alt"}, "s" }
 
-    -- Menu bar
-    menubarItem = hs.menubar.new()
-    menubarItem:setTitle("📝")
-    menubarItem:setMenu(buildMenu)
-
     -- Hotkey
     hotkey = hs.hotkey.bind(config.hotkey[1], config.hotkey[2], toggleWebview)
 
@@ -427,16 +422,18 @@ function M.stop()
         webview:delete()
         webview = nil
     end
-    if menubarItem then
-        menubarItem:delete()
-        menubarItem = nil
-    end
     if hotkey then
         hotkey:delete()
         hotkey = nil
     end
     isVisible = false
     print("Scratchpad stopped")
+end
+
+-- Function for unified menu integration
+
+function M.getMenuItems()
+    return buildMenu()
 end
 
 return M
