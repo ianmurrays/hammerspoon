@@ -4,6 +4,7 @@ local slackStatus = require("slack_status")
 local scratchpad = require("scratchpad")
 local batteryIndicator = require("battery_indicator")
 local hyperduck = require("hyperduck")
+local windowManager = require("window_manager")
 
 -- Read Slack token from macOS Keychain
 -- One-time setup: security add-generic-password -a "$USER" -s "slack-status-token" -w "xoxp-your-token-here"
@@ -108,3 +109,6 @@ batteryIndicator.init({})
 
 -- Initialize Hyperduck URL opener
 hyperduck.init({})
+
+-- Initialize Window Manager (Rectangle-style shortcuts)
+windowManager.init({})
