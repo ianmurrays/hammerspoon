@@ -102,9 +102,21 @@ local function nextDisplay()
     if not win then return end
 
     local currentScreen = win:screen()
-    local targetScreen = currentScreen:next()
+    local currentFrame = currentScreen:frame()
+    local screens = hs.screen.allScreens()
 
-    if targetScreen and targetScreen:id() ~= currentScreen:id() then
+    -- Find the screen to the right (smallest x that is > current x)
+    local targetScreen = nil
+    local minX = math.huge
+    for _, screen in ipairs(screens) do
+        local frame = screen:frame()
+        if frame.x > currentFrame.x and frame.x < minX then
+            minX = frame.x
+            targetScreen = screen
+        end
+    end
+
+    if targetScreen then
         win:moveToScreen(targetScreen, false, true, 0)
     end
 end
@@ -114,9 +126,21 @@ local function prevDisplay()
     if not win then return end
 
     local currentScreen = win:screen()
-    local targetScreen = currentScreen:previous()
+    local currentFrame = currentScreen:frame()
+    local screens = hs.screen.allScreens()
 
-    if targetScreen and targetScreen:id() ~= currentScreen:id() then
+    -- Find the screen to the left (largest x that is < current x)
+    local targetScreen = nil
+    local maxX = -math.huge
+    for _, screen in ipairs(screens) do
+        local frame = screen:frame()
+        if frame.x < currentFrame.x and frame.x > maxX then
+            maxX = frame.x
+            targetScreen = screen
+        end
+    end
+
+    if targetScreen then
         win:moveToScreen(targetScreen, false, true, 0)
     end
 end
