@@ -5,6 +5,7 @@ local scratchpad = require("scratchpad")
 local batteryIndicator = require("battery_indicator")
 local hyperduck = require("hyperduck")
 local windowManager = require("window_manager")
+local gifFinder = require("gif_finder")
 local unifiedMenu = require("unified_menu")
 
 -- Read Slack token from macOS Keychain
@@ -113,6 +114,13 @@ hyperduck.init({})
 
 -- Initialize Window Manager (Rectangle-style shortcuts)
 windowManager.init({})
+
+-- Initialize GIF Finder (Ctrl+Option+G to toggle)
+-- One-time setup: security add-generic-password -a "$USER" -s "klipy-api-key" -w "YOUR_API_KEY"
+local klipyApiKey = getKeychainPassword("klipy-api-key", os.getenv("USER"))
+gifFinder.init({
+    apiKey = klipyApiKey
+})
 
 -- Initialize Unified Menu (combines Slack Status, Hyperduck, Scratchpad)
 unifiedMenu.init({
