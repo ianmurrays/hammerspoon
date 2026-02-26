@@ -9,7 +9,7 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | `window_manager` | Rectangle-style window tiling with fraction cycling (1/2, 1/3, 2/3) | Ctrl+Alt+Cmd + arrows/F/Home/End |
 | `scratchpad` | Encrypted markdown editor synced via iCloud | Ctrl+Alt+S |
 | `gif_finder` | GIF search via Klipy API, copies URL to clipboard | Ctrl+Alt+G |
-| `slack_status` | Auto-updates Slack status based on WiFi network; manual overrides via menu | — |
+| `slack_status` | Auto-updates Slack status based on WiFi network; manual overrides and custom status via menu | — |
 | `hyperduck` | Monitors iCloud file for URLs sent from iPhone, opens them on Mac | — |
 | `battery_indicator` | Shows remaining battery time in menu bar | — |
 | `unified_menu` | Combines Slack Status, Hyperduck, and Scratchpad into a single menubar item | — |
