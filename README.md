@@ -12,7 +12,8 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | `slack_status` | Auto-updates Slack status based on WiFi network; manual overrides and custom status via menu | — |
 | `hyperduck` | Monitors iCloud file for URLs sent from iPhone, opens them on Mac | — |
 | `battery_indicator` | Shows remaining battery time in menu bar | — |
-| `unified_menu` | Combines Slack Status, Hyperduck, and Scratchpad into a single menubar item | — |
+| `screen_blur` | Full-screen blur overlay for privacy (downsample trick via `sips`) | Ctrl+Alt+B |
+| `unified_menu` | Combines Slack Status, Hyperduck, Scratchpad, and Screen Blur into a single menubar item | — |
 
 ## Hotkeys
 
@@ -27,6 +28,7 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | Ctrl+Alt+Cmd+End | Move window to next display |
 | Ctrl+Alt+S | Toggle scratchpad |
 | Ctrl+Alt+G | Toggle GIF finder |
+| Ctrl+Alt+B | Toggle screen blur overlay (also dismisses on click or any keypress) |
 
 > **Note:** Home = Fn+Left and End = Fn+Right on Mac keyboards.
 

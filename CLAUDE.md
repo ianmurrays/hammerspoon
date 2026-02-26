@@ -28,7 +28,8 @@ return M
 | `gif_finder` | GIF search via Klipy API, copies URL to clipboard | Ctrl+Alt+G |
 | `hyperduck` | Monitors iCloud file for URLs sent from iPhone, opens them on Mac | — |
 | `battery_indicator` | Shows remaining battery time in menu bar | — |
-| `unified_menu` | Combines slack_status, hyperduck, and scratchpad into a single menubar item | — |
+| `screen_blur` | Full-screen blur overlay for privacy (downsample trick via `sips`) | Ctrl+Alt+B |
+| `unified_menu` | Combines slack_status, hyperduck, scratchpad, and screen_blur into a single menubar item | — |
 
 **Unified menu integration:** Modules that appear in the unified menubar expose `getMenuItems()` (returns menu table) and optionally `setUpdateCallback(fn)` so the unified menu can refresh when state changes.
 

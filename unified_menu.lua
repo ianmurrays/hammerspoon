@@ -44,6 +44,18 @@ local function buildUnifiedMenu()
         end
     end
 
+    -- Separator
+    table.insert(menu, { title = "-" })
+
+    -- Screen Blur section
+    table.insert(menu, { title = "Screen Blur", disabled = true })
+    local screenBlurItems = modules.screenBlur and modules.screenBlur.getMenuItems()
+    if screenBlurItems and type(screenBlurItems) == "table" then
+        for _, item in ipairs(screenBlurItems) do
+            table.insert(menu, item)
+        end
+    end
+
     return menu
 end
 
@@ -69,6 +81,7 @@ function M.init(cfg)
     modules.hyperduck = cfg.hyperduck
     modules.scratchpad = cfg.scratchpad
     modules.slackStatus = cfg.slackStatus
+    modules.screenBlur = cfg.screenBlur
 
     -- Create menubar
     menubarItem = hs.menubar.new()

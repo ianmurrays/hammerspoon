@@ -6,6 +6,7 @@ local batteryIndicator = require("battery_indicator")
 local hyperduck = require("hyperduck")
 local windowManager = require("window_manager")
 local gifFinder = require("gif_finder")
+local screenBlur = require("screen_blur")
 local unifiedMenu = require("unified_menu")
 
 -- Read Slack token from macOS Keychain
@@ -122,9 +123,13 @@ gifFinder.init({
     apiKey = klipyApiKey
 })
 
--- Initialize Unified Menu (combines Slack Status, Hyperduck, Scratchpad)
+-- Initialize Screen Blur (Ctrl+Alt+B to toggle)
+screenBlur.init({})
+
+-- Initialize Unified Menu (combines Slack Status, Hyperduck, Scratchpad, Screen Blur)
 unifiedMenu.init({
     slackStatus = slackStatus,
     hyperduck = hyperduck,
-    scratchpad = scratchpad
+    scratchpad = scratchpad,
+    screenBlur = screenBlur
 })
