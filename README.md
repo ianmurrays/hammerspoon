@@ -8,7 +8,7 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 |---|---|---|
 | `window_manager` | Rectangle-style window tiling with fraction cycling (1/2, 1/3, 2/3) | Ctrl+Alt+Cmd + arrows/F/Home/End |
 | `scratchpad` | Encrypted markdown editor synced via iCloud | Ctrl+Alt+S |
-| `gif_finder` | GIF search via Klipy API, copies URL to clipboard | Ctrl+Alt+G |
+| `gif_finder` | GIF search via Klipy API with favorites and recents, copies URL to clipboard | Ctrl+Alt+G |
 | `slack_status` | Auto-updates Slack status based on WiFi network; manual overrides and custom status via menu | — |
 | `hyperduck` | Monitors iCloud file for URLs sent from iPhone, opens them on Mac | — |
 | `battery_indicator` | Shows remaining battery time in menu bar | — |
@@ -63,10 +63,11 @@ security add-generic-password -a "hammerspoon" -s "scratchpad-encryption-key" -w
 
 ### iCloud Sync
 
-The scratchpad and Hyperduck modules store files in iCloud Drive:
+The scratchpad, Hyperduck, and GIF Finder modules store files in iCloud Drive:
 
 - **Scratchpad:** `~/Library/Mobile Documents/com~apple~CloudDocs/Scratchpad/scratchpad.txt`
 - **Hyperduck:** `~/Library/Mobile Documents/com~apple~CloudDocs/Hyperduck/inbox.txt`
+- **GIF Finder:** `~/Library/Mobile Documents/com~apple~CloudDocs/GifFinder/favorites.json` and `recents.json`
 
 Hyperduck requires an iPhone Shortcut that appends timestamped URLs (`timestamp|url` format) to the inbox file. URLs older than 7 days are automatically purged.
 
