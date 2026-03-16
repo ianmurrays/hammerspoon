@@ -236,6 +236,29 @@ local function buildHTML()
   .gif-item:hover .star-btn,
   .gif-item.selected .star-btn { opacity: 1; }
   .gif-item .star-btn.favorited { color: #ffd700; opacity: 1; }
+  .gif-item .copy-html-btn {
+    position: absolute;
+    bottom: 4px;
+    right: 4px;
+    width: 28px;
+    height: 28px;
+    background: rgba(0,0,0,0.6);
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 28px;
+    text-align: center;
+    color: #888;
+    padding: 0;
+    opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 2;
+    font-family: monospace;
+  }
+  .gif-item:hover .copy-html-btn,
+  .gif-item.selected .copy-html-btn { opacity: 1; }
+  .gif-item .copy-html-btn:hover { color: #6c9bff; }
 </style>
 </head>
 <body>
@@ -324,6 +347,19 @@ local function buildHTML()
           });
         });
         item.appendChild(star);
+
+        const htmlBtn = document.createElement('button');
+        htmlBtn.className = 'copy-html-btn';
+        htmlBtn.textContent = '<>';
+        htmlBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          window.webkit.messageHandlers.gifFinder.postMessage({
+            action: 'selectHtml',
+            thumb: gif.thumb,
+            url: gif.url
+          });
+        });
+        item.appendChild(htmlBtn);
 
         const img = document.createElement('img');
         img.src = gif.thumb;
@@ -568,6 +604,15 @@ local function showWebview()
                     hs.notify.new({
                         title = "GIF Finder",
                         informativeText = "GIF URL copied to clipboard",
+                        withdrawAfter = 3
+                    }):send()
+                    hideWebview()
+                elseif action == "selectHtml" then
+                    addToRecents(msg.body.thumb, msg.body.url)
+                    hs.pasteboard.setContents('<img src="' .. msg.body.url .. '">')
+                    hs.notify.new({
+                        title = "GIF Finder",
+                        informativeText = "GIF img tag copied to clipboard",
                         withdrawAfter = 3
                     }):send()
                     hideWebview()
