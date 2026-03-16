@@ -1,0 +1,9 @@
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #212121; padding: 8px; height: 100vh; }
+    .CodeMirror {
+      height: calc(100vh - 16px);
+      font-family: 'SF Mono', Menlo, Monaco, monospace;
+      font-size: 14px;
+      line-height: 1.5;
+      border-radius: 4px;
+    }

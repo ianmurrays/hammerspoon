@@ -35,6 +35,19 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 
 > **Note:** Home = Fn+Left and End = Fn+Right on Mac keyboards.
 
+## File Structure
+
+Webview modules (`gif_finder`, `slack_status`, `scratchpad`) store their HTML, CSS, and JS in separate files under `html/`:
+
+```
+html/
+  gif_finder/    — GIF search UI
+  slack_status/  — Custom status form
+  scratchpad/    — CodeMirror markdown editor
+```
+
+Each directory contains `index.html`, `style.css`, and `script.js`. At runtime, `html_loader.lua` reads these files and inlines the CSS/JS into the HTML before passing it to `hs.webview:html()`.
+
 ## Setup
 
 ### Prerequisites

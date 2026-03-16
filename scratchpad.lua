@@ -8,6 +8,7 @@
 --    security add-generic-password -a "hammerspoon" -s "scratchpad-encryption-key" -w "PASTE_KEY_HERE"
 
 local M = {}
+local htmlLoader = require("html_loader")
 
 -- Private state
 local webview = nil
@@ -220,71 +221,8 @@ end
 -- HTML template
 
 local function buildHTML(content)
-    -- Escape backslashes and backticks for JavaScript string embedding
     local escaped = content:gsub("\\", "\\\\"):gsub("`", "\\`"):gsub("${", "\\${")
-
-    return [[
-<!DOCTYPE html>
-<html>
-<head>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-darker.min.css">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #212121; padding: 8px; height: 100vh; }
-    .CodeMirror {
-      height: calc(100vh - 16px);
-      font-family: 'SF Mono', Menlo, Monaco, monospace;
-      font-size: 14px;
-      line-height: 1.5;
-      border-radius: 4px;
-    }
-  </style>
-</head>
-<body>
-  <textarea id="content"></textarea>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/markdown/markdown.min.js"></script>
-  <script>
-    const initialContent = `]] .. escaped .. [[`;
-    const editor = CodeMirror.fromTextArea(document.getElementById('content'), {
-      mode: 'markdown',
-      theme: 'material-darker',
-      lineWrapping: true,
-      autofocus: true,
-      lineNumbers: false,
-      viewportMargin: Infinity
-    });
-    editor.setValue(initialContent);
-
-    // Expose getValue for Lua callbacks
-    window.getEditorValue = () => editor.getValue();
-
-    function save(andClose) {
-      window.webkit.messageHandlers.scratchpad.postMessage({
-        action: andClose ? 'save_and_close' : 'save',
-        content: editor.getValue()
-      });
-    }
-
-    // Save on blur
-    editor.on('blur', () => save(false));
-
-    // Escape to save and close, Cmd+S to save
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        save(true);
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
-        e.preventDefault();
-        save(false);
-      }
-    });
-  </script>
-</body>
-</html>
-]]
+    return htmlLoader.load("scratchpad", { ["{{CONTENT}}"] = escaped })
 end
 
 -- WebView management
