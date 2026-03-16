@@ -7,6 +7,7 @@ local hyperduck = require("hyperduck")
 local windowManager = require("window_manager")
 local gifFinder = require("gif_finder")
 local screenBlur = require("screen_blur")
+local stt = require("stt")
 local unifiedMenu = require("unified_menu")
 
 -- Read Slack token from macOS Keychain
@@ -125,6 +126,9 @@ gifFinder.init({
 
 -- Initialize Screen Blur (Ctrl+Alt+B to toggle)
 screenBlur.init({})
+
+-- Initialize STT (Hyper+S toggle, Hyper+D hold-to-talk)
+stt.init({})
 
 -- Initialize Unified Menu (combines Slack Status, Hyperduck, Scratchpad, Screen Blur)
 unifiedMenu.init({

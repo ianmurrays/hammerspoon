@@ -1,0 +1,425 @@
+-- Speech-to-Text Module for Hammerspoon
+-- Records audio via a local parakeet-mlx daemon, transcribes on stop.
+-- Daemon is started on demand and stopped after idle timeout.
+-- Toggle recording with Hyper+S, hold-to-talk with Hyper+D.
+--
+-- Config options (passed via init(cfg)):
+--   host           = string   (default: "127.0.0.1")
+--   port           = number   (default: 9876)
+--   paste_method   = "clipboard" or "keystrokes"
+--   idle_timeout   = number   (seconds, default: 300)
+--   idle_timeout   = number   (seconds, default: 300)
+
+local M = {}
+
+-- Config defaults
+local config = {
+    host = "127.0.0.1",
+    port = 9876,
+    paste_method = "clipboard",
+    idle_timeout = 5 * 60,
+    daemon_cmd = "/opt/homebrew/bin/uv",
+    daemon_dir = os.getenv("HOME") .. "/.hammerspoon/stt-daemon",
+}
+
+-- Overlay
+local PILL_WIDTH = 220
+local PILL_HEIGHT = 36
+local spinnerFrames = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+-- State: "idle" | "starting" | "recording" | "transcribing"
+local state = "idle"
+local sock = nil
+local canvas = nil
+local eventTap = nil
+local fnShiftHeld = false
+local animTimer = nil
+local connectTimer = nil
+local stopTimeout = nil
+local idleTimer = nil
+local daemonTask = nil
+
+-- Forward declarations
+local showPill, updatePill, hideOverlay
+local connectAndStart, retryConnect, sendCommand, handleMessage
+local pasteText, cleanup, startDaemon, stopDaemon, resetIdleTimer
+
+-- ── Daemon lifecycle ──────────────────────────────────────────────
+
+startDaemon = function()
+    if daemonTask and daemonTask:isRunning() then return end
+    print("stt: starting daemon")
+    daemonTask = hs.task.new(
+        config.daemon_cmd,
+        function(exitCode, stdout, stderr)
+            print("stt: daemon exited (code=" .. tostring(exitCode) .. ")")
+            daemonTask = nil
+        end,
+        function(task, stdout, stderr)
+            return true -- discard streaming output
+        end,
+        {"run", "stt_daemon.py"}
+    )
+    daemonTask:setWorkingDirectory(config.daemon_dir)
+    daemonTask:start()
+end
+
+stopDaemon = function()
+    if daemonTask and daemonTask:isRunning() then
+        print("stt: stopping daemon")
+        daemonTask:terminate()
+        daemonTask = nil
+    end
+end
+
+resetIdleTimer = function()
+    if idleTimer then idleTimer:stop() end
+    idleTimer = hs.timer.doAfter(config.idle_timeout, function()
+        idleTimer = nil
+        print("stt: idle timeout (" .. config.idle_timeout .. "s), stopping daemon")
+        stopDaemon()
+    end)
+end
+
+-- ── Commands & messages ───────────────────────────────────────────
+
+sendCommand = function(cmd)
+    local connected = sock and sock:connected()
+    print("stt: sendCommand('" .. cmd .. "') connected=" .. tostring(connected))
+    if connected then
+        sock:write(hs.json.encode({cmd = cmd}) .. "\n")
+    end
+
+    if cmd == "stop" then
+        if stopTimeout then stopTimeout:stop() end
+        stopTimeout = hs.timer.doAfter(15, function()
+            stopTimeout = nil
+            if state ~= "idle" then
+                print("stt: stop timeout — forcing cleanup")
+                hideOverlay()
+                cleanup()
+                resetIdleTimer()
+            end
+        end)
+    end
+end
+
+pasteText = function(text)
+    if not text or #text == 0 then return end
+    if config.paste_method == "clipboard" then
+        hs.pasteboard.setContents(text)
+        hs.eventtap.keyStroke({"cmd"}, "v")
+    else
+        hs.eventtap.keyStrokes(text)
+    end
+end
+
+cleanup = function()
+    print("stt: cleanup()")
+    if sock then pcall(function() sock:disconnect() end); sock = nil end
+    if connectTimer then connectTimer:stop(); connectTimer = nil end
+    if stopTimeout then stopTimeout:stop(); stopTimeout = nil end
+    state = "idle"
+end
+
+handleMessage = function(data)
+    if not data then return end
+    data = data:gsub("%s+$", "")
+    print("stt: recv: " .. data:sub(1, 200))
+    local ok, msg = pcall(hs.json.decode, data)
+    if not ok or not msg then print("stt: JSON decode failed"); return end
+
+    if msg.type == "ready" then
+        if connectTimer then connectTimer:stop(); connectTimer = nil end
+        if state == "starting" then
+            state = "recording"
+            updatePill("recording")
+        end
+        sendCommand("start")
+
+    elseif msg.type == "transcribing" then
+        state = "transcribing"
+        updatePill("transcribing")
+
+    elseif msg.type == "final" then
+        if stopTimeout then stopTimeout:stop(); stopTimeout = nil end
+        hideOverlay()
+        pasteText(msg.text)
+        cleanup()
+        resetIdleTimer()
+
+    elseif msg.type == "error" then
+        if stopTimeout then stopTimeout:stop(); stopTimeout = nil end
+        hs.alert.show("STT: " .. (msg.message or "unknown error"))
+        hideOverlay()
+        cleanup()
+        resetIdleTimer()
+    end
+end
+
+-- ── Overlay ───────────────────────────────────────────────────────
+
+showPill = function(pillState)
+    if canvas then canvas:delete(); canvas = nil end
+    if animTimer then animTimer:stop(); animTimer = nil end
+
+    local screen = hs.screen.mainScreen()
+    local sf = screen:frame()
+    local w, h = PILL_WIDTH, PILL_HEIGHT
+    local x = sf.x + (sf.w - w) / 2
+    local y = sf.y + sf.h - h - 40
+    local ty = (h - 18) / 2
+
+    canvas = hs.canvas.new({x = x, y = y, w = w, h = h})
+    canvas:appendElements(
+        -- [1] Background pill
+        {type = "rectangle", fillColor = {hex = "#1a1a2e", alpha = 0.9},
+         roundedRectRadii = {xRadius = h / 2, yRadius = h / 2}, action = "fill"},
+        -- [2] Status indicator
+        {type = "text", frame = {x = 14, y = ty, w = 18, h = 18}, text = ""},
+        -- [3] Status text
+        {type = "text", frame = {x = 34, y = ty, w = w - 74, h = 18}, text = ""},
+        -- [4] Stop button
+        {type = "text", frame = {x = w - 36, y = (h - 24) / 2, w = 28, h = 24},
+         text = hs.styledtext.new("×", {
+             font = {name = ".AppleSystemUIFont", size = 20},
+             color = {white = 0.6},
+             paragraphStyle = {alignment = "center"},
+         })}
+    )
+    canvas:level(hs.canvas.windowLevels.overlay)
+    canvas:behavior({"canJoinAllSpaces", "stationary"})
+
+    canvas:mouseCallback(function(c, cbMsg, id, mx, my)
+        if cbMsg == "mouseDown" and mx > w - 36 then
+            print("stt: stop button clicked, state=" .. state)
+            if state == "recording" or state == "transcribing" then
+                sendCommand("stop")
+            elseif state == "starting" then
+                hideOverlay()
+                cleanup()
+            end
+        end
+    end)
+    canvas:canvasMouseEvents(true, false, false, false)
+
+    canvas:show()
+    updatePill(pillState)
+end
+
+updatePill = function(pillState)
+    if not canvas then return end
+    if animTimer then animTimer:stop(); animTimer = nil end
+
+    if pillState == "starting" then
+        canvas[2].text = hs.styledtext.new(spinnerFrames[1], {
+            font = {name = "Menlo", size = 14},
+            color = {white = 0.7},
+            paragraphStyle = {alignment = "center"},
+        })
+        canvas[3].text = hs.styledtext.new("Loading model…", {
+            font = {name = ".AppleSystemUIFont", size = 14},
+            color = {white = 0.7},
+        })
+        local idx = 1
+        animTimer = hs.timer.doEvery(0.08, function()
+            if not canvas then return end
+            idx = (idx % #spinnerFrames) + 1
+            canvas[2].text = hs.styledtext.new(spinnerFrames[idx], {
+                font = {name = "Menlo", size = 14},
+                color = {white = 0.7},
+                paragraphStyle = {alignment = "center"},
+            })
+        end)
+
+    elseif pillState == "recording" then
+        canvas[2].text = hs.styledtext.new("●", {
+            font = {name = ".AppleSystemUIFont", size = 12},
+            color = {red = 1},
+            paragraphStyle = {alignment = "center"},
+        })
+        canvas[3].text = hs.styledtext.new("Recording…", {
+            font = {name = ".AppleSystemUIFont", size = 14},
+            color = {white = 1},
+        })
+        local dotVisible = true
+        animTimer = hs.timer.doEvery(0.6, function()
+            if not canvas then return end
+            dotVisible = not dotVisible
+            canvas[2].text = hs.styledtext.new("●", {
+                font = {name = ".AppleSystemUIFont", size = 12},
+                color = {red = 1, alpha = dotVisible and 1 or 0.2},
+                paragraphStyle = {alignment = "center"},
+            })
+        end)
+
+    elseif pillState == "transcribing" then
+        canvas[2].text = hs.styledtext.new(spinnerFrames[1], {
+            font = {name = "Menlo", size = 14},
+            color = {white = 0.7},
+            paragraphStyle = {alignment = "center"},
+        })
+        canvas[3].text = hs.styledtext.new("Transcribing…", {
+            font = {name = ".AppleSystemUIFont", size = 14},
+            color = {white = 0.7},
+        })
+        local idx = 1
+        animTimer = hs.timer.doEvery(0.08, function()
+            if not canvas then return end
+            idx = (idx % #spinnerFrames) + 1
+            canvas[2].text = hs.styledtext.new(spinnerFrames[idx], {
+                font = {name = "Menlo", size = 14},
+                color = {white = 0.7},
+                paragraphStyle = {alignment = "center"},
+            })
+        end)
+    end
+end
+
+hideOverlay = function()
+    if animTimer then animTimer:stop(); animTimer = nil end
+    if canvas then canvas:delete(); canvas = nil end
+end
+
+-- ── Connection ────────────────────────────────────────────────────
+
+local function makeSocketCallback()
+    return function(data, tag)
+        handleMessage(data)
+        if sock and sock:connected() then
+            sock:read("\n")
+        end
+    end
+end
+
+retryConnect = function(attempt)
+    if state ~= "starting" then return end
+    if attempt > 60 then
+        hs.alert.show("STT: daemon failed to start")
+        hideOverlay()
+        cleanup()
+        return
+    end
+
+    if sock then pcall(function() sock:disconnect() end) end
+    sock = hs.socket.new(makeSocketCallback())
+    sock:connect(config.host, config.port)
+    sock:read("\n")
+
+    connectTimer = hs.timer.doAfter(1, function()
+        connectTimer = nil
+        retryConnect(attempt + 1)
+    end)
+end
+
+connectAndStart = function()
+    print("stt: connectAndStart()")
+
+    if idleTimer then idleTimer:stop(); idleTimer = nil end
+    if sock then pcall(function() sock:disconnect() end); sock = nil end
+
+    -- Daemon not running → start it and poll until ready
+    if not daemonTask or not daemonTask:isRunning() then
+        startDaemon()
+        state = "starting"
+        showPill("starting")
+        retryConnect(0)
+        return
+    end
+
+    -- Daemon running → connect directly
+    sock = hs.socket.new(makeSocketCallback())
+    sock:connect(config.host, config.port)
+    sock:read("\n")
+
+    state = "recording"
+    showPill("recording")
+
+    -- If daemon is alive but not responding, restart it
+    connectTimer = hs.timer.doAfter(2, function()
+        connectTimer = nil
+        if state == "recording" then
+            print("stt: daemon not responding, restarting")
+            stopDaemon()
+            startDaemon()
+            state = "starting"
+            updatePill("starting")
+            retryConnect(0)
+        end
+    end)
+end
+
+-- ── Hotkeys (via eventtap for fn combinations) ────────────────────
+
+local function toggleRecording()
+    print("stt: toggle state=" .. state)
+    if state == "idle" then
+        connectAndStart()
+    elseif state == "recording" then
+        sendCommand("stop")
+    elseif state == "starting" then
+        hideOverlay()
+        cleanup()
+    end
+end
+
+-- ── Public API ────────────────────────────────────────────────────
+
+function M.init(cfg)
+    cfg = cfg or {}
+    for k, v in pairs(cfg) do config[k] = v end
+
+    -- fn+space: toggle dictation
+    -- fn+shift: hold-to-talk (hold both to record, release either to stop)
+    fnShiftHeld = false
+    eventTap = hs.eventtap.new(
+        {hs.eventtap.event.types.keyDown, hs.eventtap.event.types.flagsChanged},
+        function(event)
+            local evType = event:getType()
+            local flags = event:getFlags()
+
+            -- fn+space → toggle
+            if evType == hs.eventtap.event.types.keyDown then
+                if flags.fn and not flags.cmd and not flags.alt and not flags.ctrl
+                   and event:getKeyCode() == hs.keycodes.map["space"] then
+                    print("stt: fn+space pressed")
+                    toggleRecording()
+                    return true -- consume the event
+                end
+            end
+
+            -- fn+shift → hold-to-talk
+            if evType == hs.eventtap.event.types.flagsChanged then
+                local bothHeld = flags.fn and flags.shift
+                                 and not flags.cmd and not flags.alt and not flags.ctrl
+                if bothHeld and not fnShiftHeld then
+                    fnShiftHeld = true
+                    print("stt: fn+shift held, state=" .. state)
+                    if state == "idle" then connectAndStart() end
+                elseif not bothHeld and fnShiftHeld then
+                    fnShiftHeld = false
+                    print("stt: fn+shift released, state=" .. state)
+                    if state == "recording" then sendCommand("stop") end
+                end
+            end
+
+            return false
+        end
+    )
+    eventTap:start()
+
+    print("STT loaded (toggle: fn+Space, hold: fn+Shift)")
+    return M
+end
+
+function M.stop()
+    if state ~= "idle" then sendCommand("stop") end
+    hideOverlay()
+    cleanup()
+    stopDaemon()
+    if eventTap then eventTap:stop(); eventTap = nil end
+    if idleTimer then idleTimer:stop(); idleTimer = nil end
+    print("STT stopped")
+end
+
+return M

@@ -13,6 +13,7 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | `hyperduck` | Monitors iCloud file for URLs sent from iPhone, opens them on Mac | — |
 | `battery_indicator` | Shows remaining battery time in menu bar | — |
 | `screen_blur` | Full-screen blur overlay for privacy (downsample trick via `sips`) | Ctrl+Alt+B |
+| `stt` | Local speech-to-text via parakeet-mlx daemon (auto-managed) | fn+Space (toggle) / fn+Shift (hold) |
 | `unified_menu` | Combines Slack Status, Hyperduck, Scratchpad, and Screen Blur into a single menubar item | — |
 
 ## Hotkeys
@@ -29,6 +30,8 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | Ctrl+Alt+S | Toggle scratchpad |
 | Ctrl+Alt+G | Toggle GIF finder |
 | Ctrl+Alt+B | Toggle screen blur overlay (also dismisses on click or any keypress) |
+| fn+Space | Toggle speech-to-text recording (press to start, press again to stop and paste) |
+| fn+Shift | Hold-to-talk speech-to-text (hold both to record, release to stop and paste) |
 
 > **Note:** Home = Fn+Left and End = Fn+Right on Mac keyboards.
 
@@ -50,6 +53,25 @@ security add-generic-password -a "$USER" -s "slack-status-token" -w "YOUR_TOKEN"
 # Klipy GIF search API key (https://partner.klipy.com)
 security add-generic-password -a "$USER" -s "klipy-api-key" -w "YOUR_API_KEY"
 ```
+
+### STT Daemon
+
+The speech-to-text module requires a local Python daemon running `parakeet-mlx`:
+
+```bash
+cd ~/.hammerspoon/stt-daemon
+uv sync
+uv run stt_daemon.py
+```
+
+To run as a background service via launchd:
+
+```bash
+cp ~/.hammerspoon/stt-daemon/com.local.stt-daemon.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.local.stt-daemon.plist
+```
+
+Logs are written to `~/Library/Logs/stt-daemon.log`.
 
 The scratchpad encryption key is generated automatically on first use. To copy it to another Mac:
 

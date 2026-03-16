@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.local.stt-daemon</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/uv</string>
+        <string>run</string>
+        <string>stt_daemon.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/ianmurrays/.hammerspoon/stt-daemon</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/ianmurrays/Library/Logs/stt-daemon.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/ianmurrays/Library/Logs/stt-daemon.log</string>
+</dict>
+</plist>
