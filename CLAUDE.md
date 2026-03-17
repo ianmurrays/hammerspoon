@@ -29,7 +29,7 @@ return M
 | `hyperduck` | Monitors iCloud file for URLs sent from iPhone, opens them on Mac | — |
 | `battery_indicator` | Shows remaining battery time in menu bar | — |
 | `screen_blur` | Full-screen blur overlay for privacy (downsample trick via `sips`) | Ctrl+Alt+B |
-| `stt` | Local speech-to-text via parakeet-mlx TCP daemon (auto-managed) | fn+Space (toggle) / fn+Shift (hold) |
+| `stt` | Local speech-to-text via parakeet-mlx TCP daemon (auto-managed), with audio tones and media pause/resume | fn+Space (toggle) / fn+Shift (hold) |
 | `unified_menu` | Combines slack_status, hyperduck, scratchpad, and screen_blur into a single menubar item | — |
 
 **Unified menu integration:** Modules that appear in the unified menubar expose `getMenuItems()` (returns menu table) and optionally `setUpdateCallback(fn)` so the unified menu can refresh when state changes.
@@ -55,3 +55,4 @@ All secrets are stored in macOS Keychain, never in code. Retrieved via `security
 - Window animations are disabled (`hs.window.animationDuration = 0`) for instant snapping
 - iCloud paths use `~/Library/Mobile Documents/com~apple~CloudDocs/`
 - Slack status uses exponential backoff retry (`retryBaseDelay * 2^retryCount`) and debounced WiFi change handling
+- STT media pause/resume uses `media-control` CLI (`brew tap ungive/media-control && brew install media-control`) for app-agnostic playback state detection on macOS 15.4+

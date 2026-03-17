@@ -13,6 +13,9 @@
 --   llm_model         = string   (default: "mistral-small-latest")
 --   llm_system_prompt = string   (custom cleanup prompt)
 --   llm_timeout       = number   (seconds, default: 10)
+--   play_tones        = boolean  (default: true, play sounds on state changes)
+--   pause_media       = boolean  (default: true, pause media during recording)
+--   media_ctl         = string   (default: "/opt/homebrew/bin/media-control")
 
 local M = {}
 
@@ -30,6 +33,10 @@ local config = {
     llm_model = "mistral-small-latest",
     llm_system_prompt = "Clean up this speech transcription. Remove filler words (um, uh, like, you know), fix punctuation and capitalization, and apply light grammar fixes. Preserve the original meaning and tone. Return ONLY the cleaned text, nothing else.",
     llm_timeout = 10,
+    -- Tones & media control
+    play_tones = true,
+    pause_media = true,
+    media_ctl = "/opt/homebrew/bin/media-control",
 }
 
 -- Overlay
@@ -50,11 +57,14 @@ local idleTimer = nil
 local llmTimer = nil
 local daemonTask = nil
 local generation = 0
+local tones = {}
+local mediaWasPlaying = false
 
 -- Forward declarations
 local showPill, updatePill, hideOverlay
 local connectAndStart, retryConnect, sendCommand, handleMessage
 local pasteText, cleanup, startDaemon, stopDaemon, resetIdleTimer, postProcessText
+local playTone, pauseMedia, resumeMedia
 
 -- ── Daemon lifecycle ──────────────────────────────────────────────
 
@@ -93,6 +103,45 @@ resetIdleTimer = function()
     end)
 end
 
+-- ── Tones & media control ────────────────────────────────────────
+
+playTone = function(name)
+    if not config.play_tones then return end
+    local snd = tones[name]
+    if snd then
+        snd:stop()  -- reset if still playing
+        snd:play()
+    end
+end
+
+pauseMedia = function()
+    if not config.pause_media then return end
+    local output, ok = hs.execute(config.media_ctl .. " get 2>/dev/null")
+    if ok and output and #output > 0 then
+        local parsed, info = pcall(hs.json.decode, output)
+        if parsed and info and info.playing then
+            mediaWasPlaying = true
+            hs.execute(config.media_ctl .. " pause")
+            print("stt: paused media (" .. (info.title or "unknown") .. ")")
+        else
+            mediaWasPlaying = false
+            print("stt: media not playing, skipping pause")
+        end
+    else
+        mediaWasPlaying = false
+        print("stt: media-control not available")
+    end
+end
+
+resumeMedia = function()
+    if not config.pause_media then return end
+    if mediaWasPlaying then
+        mediaWasPlaying = false
+        hs.execute(config.media_ctl .. " play")
+        print("stt: resumed media playback")
+    end
+end
+
 -- ── Commands & messages ───────────────────────────────────────────
 
 sendCommand = function(cmd)
@@ -103,6 +152,8 @@ sendCommand = function(cmd)
     end
 
     if cmd == "stop" then
+        playTone("stop")
+        resumeMedia()
         if stopTimeout then stopTimeout:stop() end
         stopTimeout = hs.timer.doAfter(15, function()
             stopTimeout = nil
@@ -185,6 +236,7 @@ cleanup = function()
     if connectTimer then connectTimer:stop(); connectTimer = nil end
     if stopTimeout then stopTimeout:stop(); stopTimeout = nil end
     if llmTimer then llmTimer:stop(); llmTimer = nil end
+    mediaWasPlaying = false
     state = "idle"
 end
 
@@ -200,6 +252,8 @@ handleMessage = function(data)
         if state == "starting" then
             state = "recording"
             updatePill("recording")
+            playTone("start")
+            pauseMedia()
         end
         sendCommand("start")
 
@@ -215,12 +269,14 @@ handleMessage = function(data)
             local gen = generation
             postProcessText(msg.text, function(text)
                 if state ~= "polishing" or generation ~= gen then return end
+                playTone("done")
                 hideOverlay()
                 pasteText(text)
                 cleanup()
                 resetIdleTimer()
             end)
         else
+            playTone("done")
             hideOverlay()
             pasteText(msg.text)
             cleanup()
@@ -230,6 +286,7 @@ handleMessage = function(data)
     elseif msg.type == "error" then
         if stopTimeout then stopTimeout:stop(); stopTimeout = nil end
         hs.alert.show("STT: " .. (msg.message or "unknown error"))
+        resumeMedia()
         hideOverlay()
         cleanup()
         resetIdleTimer()
@@ -275,6 +332,7 @@ showPill = function(pillState)
             if state == "recording" or state == "transcribing" then
                 sendCommand("stop")
             elseif state == "polishing" then
+                resumeMedia()
                 hideOverlay()
                 cleanup()
                 resetIdleTimer()
@@ -400,6 +458,7 @@ retryConnect = function(attempt)
     if state ~= "starting" then return end
     if attempt > 60 then
         hs.alert.show("STT: daemon failed to start")
+        resumeMedia()
         hideOverlay()
         cleanup()
         return
@@ -439,12 +498,15 @@ connectAndStart = function()
 
     state = "recording"
     showPill("recording")
+    playTone("start")
+    pauseMedia()
 
     -- If daemon is alive but not responding, restart it
     connectTimer = hs.timer.doAfter(2, function()
         connectTimer = nil
         if state == "recording" then
             print("stt: daemon not responding, restarting")
+            resumeMedia()
             stopDaemon()
             startDaemon()
             state = "starting"
@@ -473,6 +535,16 @@ end
 function M.init(cfg)
     cfg = cfg or {}
     for k, v in pairs(cfg) do config[k] = v end
+
+    -- Pre-load notification tones
+    if config.play_tones then
+        tones.start = hs.sound.getByName("Tink")
+        tones.stop  = hs.sound.getByName("Pop")
+        tones.done  = hs.sound.getByName("Glass")
+        for _, snd in pairs(tones) do
+            if snd then snd:volume(0.5) end
+        end
+    end
 
     -- fn+space: toggle dictation
     -- fn+shift: hold-to-talk (hold both to record, release either to stop)

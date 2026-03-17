@@ -13,7 +13,7 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | `hyperduck` | Monitors iCloud file for URLs sent from iPhone, opens them on Mac | — |
 | `battery_indicator` | Shows remaining battery time in menu bar | — |
 | `screen_blur` | Full-screen blur overlay for privacy (downsample trick via `sips`) | Ctrl+Alt+B |
-| `stt` | Local speech-to-text via parakeet-mlx daemon with optional LLM post-processing (filler removal, punctuation, grammar) | fn+Space (toggle) / fn+Shift (hold) |
+| `stt` | Local speech-to-text via parakeet-mlx daemon with optional LLM post-processing, audio tones, and media pause/resume | fn+Space (toggle) / fn+Shift (hold) |
 | `unified_menu` | Combines Slack Status, Hyperduck, Scratchpad, and Screen Blur into a single menubar item | — |
 
 ## Hotkeys
@@ -106,6 +106,28 @@ stt.init({
 ```
 
 The API uses the OpenAI-compatible chat completions format, so other providers (OpenRouter, Groq, Together, etc.) work by changing `llm_api_url`, `llm_model`, and `llm_api_key`.
+
+#### Audio Tones & Media Control
+
+By default, the STT module plays subtle macOS system sounds at key moments:
+- **Tink** — recording starts
+- **Pop** — recording stops
+- **Glass** — transcription/polishing complete
+
+It also pauses any currently playing media (Spotify, Music, YouTube, etc.) when recording starts and resumes it when recording stops. Media state detection uses [`media-control`](https://github.com/ungive/media-control), which must be installed via Homebrew:
+
+```bash
+brew tap ungive/media-control && brew install media-control
+```
+
+Both features can be disabled in `init.lua`:
+
+```lua
+stt.init({
+    play_tones = false,   -- disable notification sounds
+    pause_media = false,  -- disable media pause/resume
+})
+```
 
 The scratchpad encryption key is generated automatically on first use. To copy it to another Mac:
 
