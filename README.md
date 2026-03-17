@@ -13,7 +13,7 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | `hyperduck` | Monitors iCloud file for URLs sent from iPhone, opens them on Mac | — |
 | `battery_indicator` | Shows remaining battery time in menu bar | — |
 | `screen_blur` | Full-screen blur overlay for privacy (downsample trick via `sips`) | Ctrl+Alt+B |
-| `stt` | Local speech-to-text via parakeet-mlx daemon (auto-managed) | fn+Space (toggle) / fn+Shift (hold) |
+| `stt` | Local speech-to-text via parakeet-mlx daemon with optional LLM post-processing (filler removal, punctuation, grammar) | fn+Space (toggle) / fn+Shift (hold) |
 | `unified_menu` | Combines Slack Status, Hyperduck, Scratchpad, and Screen Blur into a single menubar item | — |
 
 ## Hotkeys
@@ -65,6 +65,9 @@ security add-generic-password -a "$USER" -s "slack-status-token" -w "YOUR_TOKEN"
 
 # Klipy GIF search API key (https://partner.klipy.com)
 security add-generic-password -a "$USER" -s "klipy-api-key" -w "YOUR_API_KEY"
+
+# Mistral API key for STT post-processing (optional — omit to disable)
+security add-generic-password -a "$USER" -s "mistral-api-key" -w "YOUR_API_KEY"
 ```
 
 ### STT Daemon
@@ -85,6 +88,24 @@ launchctl load ~/Library/LaunchAgents/com.local.stt-daemon.plist
 ```
 
 Logs are written to `~/Library/Logs/stt-daemon.log`.
+
+#### LLM Post-Processing (Optional)
+
+When a Mistral API key is present in the keychain, transcribed text is sent through the Mistral API to remove filler words, fix punctuation/capitalization, and apply light grammar corrections. The pill overlay shows a purple "Polishing..." spinner during this step. If the API call fails or times out (10s), the raw transcription is pasted instead.
+
+Configuration options in `init.lua`:
+
+```lua
+stt.init({
+    llm_api_key = mistralApiKey,
+    -- llm_model = "mistral-small-latest",           -- model to use
+    -- llm_system_prompt = "...",                     -- custom prompt
+    -- llm_api_url = "https://api.mistral.ai/v1/chat/completions",  -- API endpoint
+    -- llm_timeout = 10,                             -- seconds before fallback
+})
+```
+
+The API uses the OpenAI-compatible chat completions format, so other providers (OpenRouter, Groq, Together, etc.) work by changing `llm_api_url`, `llm_model`, and `llm_api_key`.
 
 The scratchpad encryption key is generated automatically on first use. To copy it to another Mac:
 

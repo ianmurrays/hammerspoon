@@ -1,14 +1,18 @@
 -- Speech-to-Text Module for Hammerspoon
 -- Records audio via a local parakeet-mlx daemon, transcribes on stop.
 -- Daemon is started on demand and stopped after idle timeout.
--- Toggle recording with Hyper+S, hold-to-talk with Hyper+D.
+-- Toggle recording with fn+Space, hold-to-talk with fn+Shift.
 --
 -- Config options (passed via init(cfg)):
---   host           = string   (default: "127.0.0.1")
---   port           = number   (default: 9876)
---   paste_method   = "clipboard" or "keystrokes"
---   idle_timeout   = number   (seconds, default: 300)
---   idle_timeout   = number   (seconds, default: 300)
+--   host              = string   (default: "127.0.0.1")
+--   port              = number   (default: 9876)
+--   paste_method      = "clipboard" or "keystrokes"
+--   idle_timeout      = number   (seconds, default: 300)
+--   llm_api_key       = string   (default: nil, disabled)
+--   llm_api_url       = string   (default: Mistral chat completions endpoint)
+--   llm_model         = string   (default: "mistral-small-latest")
+--   llm_system_prompt = string   (custom cleanup prompt)
+--   llm_timeout       = number   (seconds, default: 10)
 
 local M = {}
 
@@ -20,6 +24,12 @@ local config = {
     idle_timeout = 5 * 60,
     daemon_cmd = "/opt/homebrew/bin/uv",
     daemon_dir = os.getenv("HOME") .. "/.hammerspoon/stt-daemon",
+    -- LLM post-processing (nil api_key = disabled)
+    llm_api_key = nil,
+    llm_api_url = "https://api.mistral.ai/v1/chat/completions",
+    llm_model = "mistral-small-latest",
+    llm_system_prompt = "Clean up this speech transcription. Remove filler words (um, uh, like, you know), fix punctuation and capitalization, and apply light grammar fixes. Preserve the original meaning and tone. Return ONLY the cleaned text, nothing else.",
+    llm_timeout = 10,
 }
 
 -- Overlay
@@ -27,7 +37,7 @@ local PILL_WIDTH = 220
 local PILL_HEIGHT = 36
 local spinnerFrames = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
--- State: "idle" | "starting" | "recording" | "transcribing"
+-- State: "idle" | "starting" | "recording" | "transcribing" | "polishing"
 local state = "idle"
 local sock = nil
 local canvas = nil
@@ -37,12 +47,14 @@ local animTimer = nil
 local connectTimer = nil
 local stopTimeout = nil
 local idleTimer = nil
+local llmTimer = nil
 local daemonTask = nil
+local generation = 0
 
 -- Forward declarations
 local showPill, updatePill, hideOverlay
 local connectAndStart, retryConnect, sendCommand, handleMessage
-local pasteText, cleanup, startDaemon, stopDaemon, resetIdleTimer
+local pasteText, cleanup, startDaemon, stopDaemon, resetIdleTimer, postProcessText
 
 -- ── Daemon lifecycle ──────────────────────────────────────────────
 
@@ -114,11 +126,65 @@ pasteText = function(text)
     end
 end
 
+postProcessText = function(rawText, callback)
+    local payload = hs.json.encode({
+        model = config.llm_model,
+        messages = {
+            {role = "system", content = config.llm_system_prompt},
+            {role = "user", content = rawText},
+        },
+        temperature = 0.1,
+    })
+    local headers = {
+        ["Authorization"] = "Bearer " .. config.llm_api_key,
+        ["Content-Type"] = "application/json",
+    }
+
+    local timedOut = false
+    if llmTimer then llmTimer:stop() end
+    llmTimer = hs.timer.doAfter(config.llm_timeout, function()
+        llmTimer = nil
+        timedOut = true
+        print("stt: LLM timeout after " .. config.llm_timeout .. "s, using raw text")
+        callback(rawText)
+    end)
+
+    hs.http.asyncPost(config.llm_api_url, payload, headers, function(status, body, _)
+        if timedOut then return end
+        if llmTimer then llmTimer:stop(); llmTimer = nil end
+
+        if status ~= 200 then
+            print("stt: LLM API error (status=" .. tostring(status) .. "), using raw text")
+            callback(rawText)
+            return
+        end
+
+        local ok, resp = pcall(hs.json.decode, body)
+        if not ok or not resp or not resp.choices or #resp.choices == 0 then
+            print("stt: LLM response parse failed, using raw text")
+            callback(rawText)
+            return
+        end
+
+        local content = resp.choices[1].message and resp.choices[1].message.content
+        if not content or #content == 0 then
+            print("stt: LLM returned empty content, using raw text")
+            callback(rawText)
+            return
+        end
+
+        content = content:match("^%s*(.-)%s*$")
+        print("stt: LLM polished (" .. #rawText .. " -> " .. #content .. " chars)")
+        callback(content)
+    end)
+end
+
 cleanup = function()
     print("stt: cleanup()")
     if sock then pcall(function() sock:disconnect() end); sock = nil end
     if connectTimer then connectTimer:stop(); connectTimer = nil end
     if stopTimeout then stopTimeout:stop(); stopTimeout = nil end
+    if llmTimer then llmTimer:stop(); llmTimer = nil end
     state = "idle"
 end
 
@@ -143,10 +209,23 @@ handleMessage = function(data)
 
     elseif msg.type == "final" then
         if stopTimeout then stopTimeout:stop(); stopTimeout = nil end
-        hideOverlay()
-        pasteText(msg.text)
-        cleanup()
-        resetIdleTimer()
+        if config.llm_api_key and #config.llm_api_key > 0 and msg.text and #msg.text > 0 then
+            state = "polishing"
+            updatePill("polishing")
+            local gen = generation
+            postProcessText(msg.text, function(text)
+                if state ~= "polishing" or generation ~= gen then return end
+                hideOverlay()
+                pasteText(text)
+                cleanup()
+                resetIdleTimer()
+            end)
+        else
+            hideOverlay()
+            pasteText(msg.text)
+            cleanup()
+            resetIdleTimer()
+        end
 
     elseif msg.type == "error" then
         if stopTimeout then stopTimeout:stop(); stopTimeout = nil end
@@ -195,6 +274,10 @@ showPill = function(pillState)
             print("stt: stop button clicked, state=" .. state)
             if state == "recording" or state == "transcribing" then
                 sendCommand("stop")
+            elseif state == "polishing" then
+                hideOverlay()
+                cleanup()
+                resetIdleTimer()
             elseif state == "starting" then
                 hideOverlay()
                 cleanup()
@@ -273,6 +356,27 @@ updatePill = function(pillState)
                 paragraphStyle = {alignment = "center"},
             })
         end)
+
+    elseif pillState == "polishing" then
+        canvas[2].text = hs.styledtext.new(spinnerFrames[1], {
+            font = {name = "Menlo", size = 14},
+            color = {hex = "#a78bfa"},
+            paragraphStyle = {alignment = "center"},
+        })
+        canvas[3].text = hs.styledtext.new("Polishing…", {
+            font = {name = ".AppleSystemUIFont", size = 14},
+            color = {hex = "#a78bfa"},
+        })
+        local idx = 1
+        animTimer = hs.timer.doEvery(0.08, function()
+            if not canvas then return end
+            idx = (idx % #spinnerFrames) + 1
+            canvas[2].text = hs.styledtext.new(spinnerFrames[idx], {
+                font = {name = "Menlo", size = 14},
+                color = {hex = "#a78bfa"},
+                paragraphStyle = {alignment = "center"},
+            })
+        end)
     end
 end
 
@@ -314,6 +418,7 @@ end
 
 connectAndStart = function()
     print("stt: connectAndStart()")
+    generation = generation + 1
 
     if idleTimer then idleTimer:stop(); idleTimer = nil end
     if sock then pcall(function() sock:disconnect() end); sock = nil end

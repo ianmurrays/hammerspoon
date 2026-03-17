@@ -127,8 +127,12 @@ gifFinder.init({
 -- Initialize Screen Blur (Ctrl+Alt+B to toggle)
 screenBlur.init({})
 
--- Initialize STT (Hyper+S toggle, Hyper+D hold-to-talk)
-stt.init({})
+-- Initialize STT (fn+Space toggle, fn+Shift hold-to-talk)
+-- One-time setup: security add-generic-password -a "$USER" -s "mistral-api-key" -w "YOUR_API_KEY"
+local mistralApiKey = getKeychainPassword("mistral-api-key", os.getenv("USER"))
+stt.init({
+    llm_api_key = mistralApiKey,
+})
 
 -- Initialize Unified Menu (combines Slack Status, Hyperduck, Scratchpad, Screen Blur)
 unifiedMenu.init({
