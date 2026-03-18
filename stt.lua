@@ -2,6 +2,7 @@
 -- Records audio via a local parakeet-mlx daemon, transcribes on stop.
 -- Daemon is started on demand and stopped after idle timeout.
 -- Toggle recording with fn+Space, hold-to-talk with fn+Shift.
+-- History viewer: Ctrl+Alt+H (configurable via history_hotkey)
 --
 -- Config options (passed via init(cfg)):
 --   host              = string   (default: "127.0.0.1")
@@ -16,8 +17,10 @@
 --   play_tones        = boolean  (default: true, play sounds on state changes)
 --   pause_media       = boolean  (default: true, pause media during recording)
 --   media_ctl         = string   (default: "/opt/homebrew/bin/media-control")
+--   history_hotkey    = table    (default: {{"ctrl", "alt"}, "h"})
 
 local M = {}
+local htmlLoader = require("html_loader")
 
 -- Config defaults
 local config = {
@@ -37,7 +40,13 @@ local config = {
     play_tones = true,
     pause_media = true,
     media_ctl = "/opt/homebrew/bin/media-control",
+    -- History viewer
+    history_hotkey = {{"ctrl", "alt"}, "h"},
 }
+
+-- History
+local HISTORY_DIR = os.getenv("HOME") .. "/Library/Mobile Documents/com~apple~CloudDocs/STT"
+local HISTORY_FILE = HISTORY_DIR .. "/history.txt"
 
 -- Overlay
 local PILL_WIDTH = 220
@@ -60,11 +69,18 @@ local generation = 0
 local tones = {}
 local mediaWasPlaying = false
 
+-- History viewer state
+local historyWebview = nil
+local historyHotkey = nil
+local historyVisible = false
+
 -- Forward declarations
 local showPill, updatePill, hideOverlay
 local connectAndStart, retryConnect, sendCommand, handleMessage
 local pasteText, cleanup, startDaemon, stopDaemon, resetIdleTimer, postProcessText
+local appendHistory, cleanupWav
 local playTone, pauseMedia, resumeMedia
+local parseHistory, pushHistoryToJS, showHistoryWebview, hideHistoryWebview, toggleHistoryWebview
 
 -- ── Daemon lifecycle ──────────────────────────────────────────────
 
@@ -177,6 +193,163 @@ pasteText = function(text)
     end
 end
 
+appendHistory = function(rawText, polishedText)
+    if not rawText or #rawText == 0 then return end
+    local ok, err = pcall(function()
+        hs.fs.mkdir(HISTORY_DIR)
+        local f = io.open(HISTORY_FILE, "a")
+        if not f then
+            print("stt: failed to open history file for writing")
+            return
+        end
+        local writeOk, writeErr = pcall(function()
+            local timestamp = os.date("!%Y-%m-%dT%H:%M:%S")
+            local raw = rawText:gsub("\n", " ")
+            f:write("--- " .. timestamp .. " ---\n")
+            f:write("RAW: " .. raw .. "\n")
+            if polishedText and #polishedText > 0 and polishedText ~= rawText then
+                local polished = polishedText:gsub("\n", " ")
+                f:write("LLM: " .. polished .. "\n")
+            end
+            f:write("\n")
+        end)
+        f:close()
+        if not writeOk then error(writeErr) end
+        print("stt: appended to history (" .. #rawText .. " chars)")
+    end)
+    if not ok then
+        print("stt: history write error: " .. tostring(err))
+    end
+end
+
+cleanupWav = function(path)
+    if not path then return end
+    local ok, err = os.remove(path)
+    if ok then
+        print("stt: cleaned up WAV: " .. path)
+    else
+        print("stt: failed to remove WAV: " .. tostring(err))
+    end
+end
+
+-- ── History viewer ───────────────────────────────────────────────
+
+parseHistory = function()
+    local f = io.open(HISTORY_FILE, "r")
+    if not f then return {} end
+    local content = f:read("*a")
+    f:close()
+    if not content or content == "" then return {} end
+
+    local entries = {}
+    local current = nil
+    for line in content:gmatch("[^\n]+") do
+        local ts = line:match("^%-%-%- (.+) %-%-%-$")
+        if ts then
+            if current then table.insert(entries, current) end
+            current = { timestamp = ts, raw = nil, llm = nil }
+        elseif current then
+            local rawText = line:match("^RAW: (.+)$")
+            local llmText = line:match("^LLM: (.+)$")
+            if rawText then
+                current.raw = rawText
+            elseif llmText then
+                current.llm = llmText
+            end
+        end
+    end
+    if current then table.insert(entries, current) end
+
+    -- Reverse: newest first
+    local reversed = {}
+    for i = #entries, 1, -1 do
+        table.insert(reversed, entries[i])
+    end
+    return reversed
+end
+
+pushHistoryToJS = function()
+    if not historyWebview or not historyVisible then return end
+    local entries = parseHistory()
+    local json = hs.json.encode(entries):gsub("'", "\\'")
+    historyWebview:evaluateJavaScript(string.format("if (window.loadEntries) window.loadEntries('%s')", json))
+end
+
+showHistoryWebview = function()
+    if not historyWebview then
+        local usercontent = hs.webview.usercontent.new("sttHistory")
+            :setCallback(function(msg)
+                if type(msg.body) ~= "table" then return end
+                local action = msg.body.action
+                if action == "copy" then
+                    hs.pasteboard.setContents(msg.body.text)
+                elseif action == "close" then
+                    hideHistoryWebview()
+                end
+            end)
+
+        local screen = hs.mouse.getCurrentScreen():frame()
+        local width = 720
+        local height = 550
+        local rect = {
+            x = screen.x + (screen.w - width) / 2,
+            y = screen.y + (screen.h - height) / 2,
+            w = width,
+            h = height
+        }
+
+        historyWebview = hs.webview.new(rect, { developerExtrasEnabled = false }, usercontent)
+            :allowTextEntry(true)
+            :windowStyle({"titled", "closable", "resizable"})
+            :windowTitle("STT History")
+            :closeOnEscape(false)
+            :windowCallback(function(action, _wv, _state)
+                if action == "closing" then
+                    historyVisible = false
+                    historyWebview = nil
+                end
+            end)
+
+        historyWebview:html(htmlLoader.load("stt_history"))
+    end
+
+    -- Reposition to cursor's screen each time
+    local screen = hs.mouse.getCurrentScreen():frame()
+    local width = 720
+    local height = 550
+    historyWebview:frame({
+        x = screen.x + (screen.w - width) / 2,
+        y = screen.y + (screen.h - height) / 2,
+        w = width,
+        h = height
+    })
+
+    historyWebview:evaluateJavaScript("if (window.resetUI) window.resetUI()")
+
+    historyWebview:show()
+    historyWebview:hswindow():focus()
+    historyVisible = true
+
+    pushHistoryToJS()
+end
+
+hideHistoryWebview = function()
+    if historyWebview and historyVisible then
+        historyWebview:hide()
+        historyVisible = false
+    end
+end
+
+toggleHistoryWebview = function()
+    if historyVisible then
+        hideHistoryWebview()
+    else
+        showHistoryWebview()
+    end
+end
+
+-- ── LLM post-processing ─────────────────────────────────────────
+
 postProcessText = function(rawText, callback)
     local payload = hs.json.encode({
         model = config.llm_model,
@@ -263,15 +436,22 @@ handleMessage = function(data)
 
     elseif msg.type == "final" then
         if stopTimeout then stopTimeout:stop(); stopTimeout = nil end
+        local wavPath = msg.wav_path
         if config.llm_api_key and #config.llm_api_key > 0 and msg.text and #msg.text > 0 then
             state = "polishing"
             updatePill("polishing")
             local gen = generation
+            local rawText = msg.text
             postProcessText(msg.text, function(text)
-                if state ~= "polishing" or generation ~= gen then return end
+                if state ~= "polishing" or generation ~= gen then
+                    cleanupWav(wavPath)
+                    return
+                end
                 playTone("done")
                 hideOverlay()
                 pasteText(text)
+                appendHistory(rawText, text)
+                cleanupWav(wavPath)
                 cleanup()
                 resetIdleTimer()
             end)
@@ -279,6 +459,8 @@ handleMessage = function(data)
             playTone("done")
             hideOverlay()
             pasteText(msg.text)
+            appendHistory(msg.text, nil)
+            cleanupWav(wavPath)
             cleanup()
             resetIdleTimer()
         end
@@ -286,6 +468,9 @@ handleMessage = function(data)
     elseif msg.type == "error" then
         if stopTimeout then stopTimeout:stop(); stopTimeout = nil end
         hs.alert.show("STT: " .. (msg.message or "unknown error"))
+        if msg.wav_path then
+            print("stt: WAV preserved for debugging: " .. msg.wav_path)
+        end
         resumeMedia()
         hideOverlay()
         cleanup()
@@ -585,8 +770,14 @@ function M.init(cfg)
     )
     eventTap:start()
 
-    print("STT loaded (toggle: fn+Space, hold: fn+Shift)")
+    historyHotkey = hs.hotkey.bind(config.history_hotkey[1], config.history_hotkey[2], toggleHistoryWebview)
+
+    print("STT loaded (toggle: fn+Space, hold: fn+Shift, history: Ctrl+Alt+H)")
     return M
+end
+
+function M.showHistory()
+    showHistoryWebview()
 end
 
 function M.stop()
@@ -596,6 +787,9 @@ function M.stop()
     stopDaemon()
     if eventTap then eventTap:stop(); eventTap = nil end
     if idleTimer then idleTimer:stop(); idleTimer = nil end
+    if historyWebview then historyWebview:delete(); historyWebview = nil end
+    if historyHotkey then historyHotkey:delete(); historyHotkey = nil end
+    historyVisible = false
     print("STT stopped")
 end
 

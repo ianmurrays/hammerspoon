@@ -29,7 +29,7 @@ return M
 | `hyperduck` | Monitors iCloud file for URLs sent from iPhone, opens them on Mac | — |
 | `battery_indicator` | Shows remaining battery time in menu bar | — |
 | `screen_blur` | Full-screen blur overlay for privacy (downsample trick via `sips`) | Ctrl+Alt+B |
-| `stt` | Local speech-to-text via parakeet-mlx TCP daemon (auto-managed), with audio tones and media pause/resume | fn+Space (toggle) / fn+Shift (hold) |
+| `stt` | Local speech-to-text via parakeet-mlx TCP daemon (auto-managed), with audio tones, media pause/resume, and history viewer | fn+Space (toggle) / fn+Shift (hold) / Ctrl+Alt+H (history) |
 | `unified_menu` | Combines slack_status, hyperduck, scratchpad, and screen_blur into a single menubar item | — |
 
 **Unified menu integration:** Modules that appear in the unified menubar expose `getMenuItems()` (returns menu table) and optionally `setUpdateCallback(fn)` so the unified menu can refresh when state changes.

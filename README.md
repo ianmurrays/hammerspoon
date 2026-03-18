@@ -13,7 +13,7 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | `hyperduck` | Monitors iCloud file for URLs sent from iPhone, opens them on Mac | — |
 | `battery_indicator` | Shows remaining battery time in menu bar | — |
 | `screen_blur` | Full-screen blur overlay for privacy (downsample trick via `sips`) | Ctrl+Alt+B |
-| `stt` | Local speech-to-text via parakeet-mlx daemon with optional LLM post-processing, audio tones, and media pause/resume | fn+Space (toggle) / fn+Shift (hold) |
+| `stt` | Local speech-to-text via parakeet-mlx daemon with optional LLM post-processing, audio tones, media pause/resume, and transcription history viewer | fn+Space (toggle) / fn+Shift (hold) / Ctrl+Alt+H (history) |
 | `unified_menu` | Combines Slack Status, Hyperduck, Scratchpad, and Screen Blur into a single menubar item | — |
 
 ## Hotkeys
@@ -32,18 +32,20 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | Ctrl+Alt+B | Toggle screen blur overlay (also dismisses on click or any keypress) |
 | fn+Space | Toggle speech-to-text recording (press to start, press again to stop and paste) |
 | fn+Shift | Hold-to-talk speech-to-text (hold both to record, release to stop and paste) |
+| Ctrl+Alt+H | Toggle STT transcription history viewer |
 
 > **Note:** Home = Fn+Left and End = Fn+Right on Mac keyboards.
 
 ## File Structure
 
-Webview modules (`gif_finder`, `slack_status`, `scratchpad`) store their HTML, CSS, and JS in separate files under `html/`:
+Webview modules (`gif_finder`, `slack_status`, `scratchpad`, `stt`) store their HTML, CSS, and JS in separate files under `html/`:
 
 ```
 html/
   gif_finder/    — GIF search UI
   slack_status/  — Custom status form
   scratchpad/    — CodeMirror markdown editor
+  stt_history/   — Transcription history viewer
 ```
 
 Each directory contains `index.html`, `style.css`, and `script.js`. At runtime, `html_loader.lua` reads these files and inlines the CSS/JS into the HTML before passing it to `hs.webview:html()`.
@@ -107,6 +109,12 @@ stt.init({
 
 The API uses the OpenAI-compatible chat completions format, so other providers (OpenRouter, Groq, Together, etc.) work by changing `llm_api_url`, `llm_model`, and `llm_api_key`.
 
+#### Transcription History & Audio Backup
+
+Each transcription is appended to an iCloud-synced history file at `~/Library/Mobile Documents/com~apple~CloudDocs/STT/history.txt`. Entries include a UTC timestamp, the raw transcription, and the LLM-polished version (if different). The history file grows indefinitely — clean up manually via Finder if needed.
+
+The daemon also saves each recording to a temporary WAV file in `/tmp/` before transcription. On success, the WAV is automatically deleted. On failure (transcription error, daemon crash), the WAV is preserved for debugging or manual recovery.
+
 #### Audio Tones & Media Control
 
 By default, the STT module plays subtle macOS system sounds at key moments:
@@ -146,6 +154,7 @@ The scratchpad, Hyperduck, and GIF Finder modules store files in iCloud Drive:
 - **Scratchpad:** `~/Library/Mobile Documents/com~apple~CloudDocs/Scratchpad/scratchpad.txt`
 - **Hyperduck:** `~/Library/Mobile Documents/com~apple~CloudDocs/Hyperduck/inbox.txt`
 - **GIF Finder:** `~/Library/Mobile Documents/com~apple~CloudDocs/GifFinder/favorites.json` and `recents.json`
+- **STT:** `~/Library/Mobile Documents/com~apple~CloudDocs/STT/history.txt` — append-only transcription history
 
 Hyperduck requires an iPhone Shortcut that appends timestamped URLs (`timestamp|url` format) to the inbox file. URLs older than 7 days are automatically purged.
 

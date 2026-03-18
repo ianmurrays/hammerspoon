@@ -8,16 +8,19 @@ Protocol:
   Server -> Client: {"type": "ready"}
   Client -> Server: {"cmd": "start"|"stop"|"status"|"quit"}
   Server -> Client: {"type": "transcribing"}
-  Server -> Client: {"type": "final", "text": "..."}
-  Server -> Client: {"type": "error", "message": "..."}
+  Server -> Client: {"type": "final", "text": "...", "wav_path": "..."|null}
+  Server -> Client: {"type": "error", "message": "...", "wav_path": "..."|null}
   Server -> Client: {"type": "status", "model_loaded": bool, "recording": bool}
 """
 
 import json
+import os
 import socket
 import sys
+import tempfile
 import threading
 import time
+import wave
 
 import mlx.core as mx
 import numpy as np
@@ -36,6 +39,25 @@ def send_json(conn, obj):
         conn.sendall((json.dumps(obj) + "\n").encode())
     except (BrokenPipeError, ConnectionResetError, OSError):
         pass
+
+
+def write_temp_wav(audio_array, sr):
+    """Save audio to a temp WAV file. Returns path or None on failure."""
+    try:
+        fd, path = tempfile.mkstemp(suffix=".wav", prefix="stt-")
+        os.close(fd)
+        samples = (audio_array * 32767).clip(-32768, 32767).astype(np.int16)
+        with wave.open(path, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(int(sr))
+            wf.writeframes(samples.tobytes())
+        size_kb = os.path.getsize(path) / 1024
+        print(f"Saved temp WAV: {path} ({size_kb:.0f} KB)", file=sys.stderr)
+        return path
+    except Exception as e:
+        print(f"Failed to save WAV: {e}", file=sys.stderr)
+        return None
 
 
 def recording_session(conn, stop_event):
@@ -101,6 +123,8 @@ def recording_session(conn, stop_event):
     audio = np.concatenate(audio_chunks)
     duration = len(audio) / sample_rate
     print(f"Recorded {duration:.1f}s of audio, transcribing...", file=sys.stderr)
+
+    wav_path = write_temp_wav(audio, sample_rate)
     send_json(conn, {"type": "transcribing"})
 
     try:
@@ -109,10 +133,10 @@ def recording_session(conn, stop_event):
         results = model.generate(mel)
         text = results[0].text if results else ""
         print(f"Result: '{text[:200]}'", file=sys.stderr)
-        send_json(conn, {"type": "final", "text": text})
+        send_json(conn, {"type": "final", "text": text, "wav_path": wav_path})
     except Exception as e:
         print(f"Transcription error: {e}", file=sys.stderr)
-        send_json(conn, {"type": "error", "message": str(e)})
+        send_json(conn, {"type": "error", "message": str(e), "wav_path": wav_path})
 
 
 def handle_client(conn, addr):
