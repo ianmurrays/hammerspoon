@@ -286,6 +286,8 @@ showHistoryWebview = function()
                     hs.pasteboard.setContents(msg.body.text)
                 elseif action == "close" then
                     hideHistoryWebview()
+                elseif action == "ready" then
+                    pushHistoryToJS()
                 end
             end)
 

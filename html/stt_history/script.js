@@ -112,3 +112,6 @@
       renderEntries('');
       filterBox.focus();
     };
+
+    // Signal Lua that JS is ready to receive data
+    window.webkit.messageHandlers.sttHistory.postMessage({ action: 'ready' });
