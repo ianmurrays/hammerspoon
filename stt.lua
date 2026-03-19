@@ -68,6 +68,7 @@ local daemonTask = nil
 local generation = 0
 local tones = {}
 local mediaWasPlaying = false
+local levelBuf = {}
 
 -- History viewer state
 local historyWebview = nil
@@ -77,7 +78,7 @@ local historyVisible = false
 -- Forward declarations
 local showPill, updatePill, hideOverlay
 local connectAndStart, retryConnect, sendCommand, handleMessage
-local pasteText, cleanup, startDaemon, stopDaemon, resetIdleTimer, postProcessText
+local pasteText, cleanup, startDaemon, stopDaemon, resetIdleTimer, postProcessText, drawWaveform
 local appendHistory, cleanupWav
 local playTone, pauseMedia, resumeMedia
 local parseHistory, pushHistoryToJS, showHistoryWebview, hideHistoryWebview, toggleHistoryWebview
@@ -410,13 +411,16 @@ cleanup = function()
     if stopTimeout then stopTimeout:stop(); stopTimeout = nil end
     if llmTimer then llmTimer:stop(); llmTimer = nil end
     mediaWasPlaying = false
+    levelBuf = {}
     state = "idle"
 end
 
 handleMessage = function(data)
     if not data then return end
     data = data:gsub("%s+$", "")
-    print("stt: recv: " .. data:sub(1, 200))
+    if not data:find('"audio_level"') then
+        print("stt: recv: " .. data:sub(1, 200))
+    end
     local ok, msg = pcall(hs.json.decode, data)
     if not ok or not msg then print("stt: JSON decode failed"); return end
 
@@ -465,6 +469,11 @@ handleMessage = function(data)
             resetIdleTimer()
         end
 
+    elseif msg.type == "audio_level" then
+        table.insert(levelBuf, msg.rms or 0)
+        if #levelBuf > 5 then table.remove(levelBuf, 1) end
+        if state == "recording" then drawWaveform() end
+
     elseif msg.type == "error" then
         if stopTimeout then stopTimeout:stop(); stopTimeout = nil end
         hs.alert.show("STT: " .. (msg.message or "unknown error"))
@@ -479,6 +488,24 @@ handleMessage = function(data)
 end
 
 -- ── Overlay ───────────────────────────────────────────────────────
+
+local function rmsToHeight(rms)
+    if rms < 1e-7 then return 1 end
+    local db = 20 * math.log(rms, 10)
+    if db < -50 then db = -50 end
+    if db > -10 then db = -10 end
+    return math.floor(1 + (db + 50) / 40 * 13 + 0.5)
+end
+
+drawWaveform = function()
+    if not canvas then return end
+    local barBottom = (PILL_HEIGHT - 18) / 2 + 16
+    for i = 1, 5 do
+        local rms = levelBuf[i] or 0
+        local h = rmsToHeight(rms)
+        canvas[4 + i].frame = {x = 14 + (i - 1) * 4, y = barBottom - h, w = 2, h = h}
+    end
+end
 
 showPill = function(pillState)
     if canvas then canvas:delete(); canvas = nil end
@@ -508,6 +535,18 @@ showPill = function(pillState)
              paragraphStyle = {alignment = "center"},
          })}
     )
+    -- [5]-[9] Waveform bars (hidden initially, shown during recording)
+    local barBottom = ty + 16
+    for i = 0, 4 do
+        canvas:appendElements({
+            type = "rectangle",
+            frame = {x = 14 + i * 4, y = barBottom - 1, w = 2, h = 1},
+            fillColor = {white = 1, alpha = 0},
+            action = "fill",
+            roundedRectRadii = {xRadius = 1, yRadius = 1},
+        })
+    end
+
     canvas:level(hs.canvas.windowLevels.overlay)
     canvas:behavior({"canJoinAllSpaces", "stationary"})
 
@@ -537,6 +576,11 @@ updatePill = function(pillState)
     if not canvas then return end
     if animTimer then animTimer:stop(); animTimer = nil end
 
+    -- Hide waveform bars by default (recording state will show them)
+    for i = 5, 9 do
+        if canvas[i] then canvas[i].fillColor = {white = 1, alpha = 0} end
+    end
+
     if pillState == "starting" then
         canvas[2].text = hs.styledtext.new(spinnerFrames[1], {
             font = {name = "Menlo", size = 14},
@@ -559,25 +603,15 @@ updatePill = function(pillState)
         end)
 
     elseif pillState == "recording" then
-        canvas[2].text = hs.styledtext.new("●", {
-            font = {name = ".AppleSystemUIFont", size = 12},
-            color = {red = 1},
-            paragraphStyle = {alignment = "center"},
-        })
+        canvas[2].text = hs.styledtext.new("", {})
         canvas[3].text = hs.styledtext.new("Recording…", {
             font = {name = ".AppleSystemUIFont", size = 14},
             color = {white = 1},
         })
-        local dotVisible = true
-        animTimer = hs.timer.doEvery(0.6, function()
-            if not canvas then return end
-            dotVisible = not dotVisible
-            canvas[2].text = hs.styledtext.new("●", {
-                font = {name = ".AppleSystemUIFont", size = 12},
-                color = {red = 1, alpha = dotVisible and 1 or 0.2},
-                paragraphStyle = {alignment = "center"},
-            })
-        end)
+        for i = 5, 9 do
+            if canvas[i] then canvas[i].fillColor = {white = 1, alpha = 0.7} end
+        end
+        drawWaveform()
 
     elseif pillState == "transcribing" then
         canvas[2].text = hs.styledtext.new(spinnerFrames[1], {

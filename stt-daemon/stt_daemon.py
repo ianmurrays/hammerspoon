@@ -10,6 +10,7 @@ Protocol:
   Server -> Client: {"type": "transcribing"}
   Server -> Client: {"type": "final", "text": "...", "wav_path": "..."|null}
   Server -> Client: {"type": "error", "message": "...", "wav_path": "..."|null}
+  Server -> Client: {"type": "audio_level", "rms": float}
   Server -> Client: {"type": "status", "model_loaded": bool, "recording": bool}
 """
 
@@ -75,6 +76,7 @@ def recording_session(conn, stop_event):
     audio_chunks = []
     first_logged = False
     last_rms_log = 0.0
+    latest_rms = [0.0]
 
     def audio_callback(indata, frames, time_info, status):
         nonlocal first_logged, last_rms_log
@@ -85,6 +87,9 @@ def recording_session(conn, stop_event):
         chunk = indata[:, 0].copy()
         audio_chunks.append(chunk)
 
+        rms = float(np.sqrt(np.mean(chunk**2)))
+        latest_rms[0] = rms
+
         if not first_logged:
             print(
                 f"First audio chunk: shape={chunk.shape}, dtype={chunk.dtype}",
@@ -94,7 +99,6 @@ def recording_session(conn, stop_event):
 
         now = time.monotonic()
         if now - last_rms_log >= 1.0:
-            rms = float(np.sqrt(np.mean(chunk**2)))
             print(
                 f"Audio RMS: {rms:.6f} (peak={float(np.max(np.abs(chunk))):.4f})",
                 file=sys.stderr,
@@ -110,6 +114,7 @@ def recording_session(conn, stop_event):
             blocksize=int(sample_rate * 0.1),
         ):
             while not stop_event.is_set():
+                send_json(conn, {"type": "audio_level", "rms": latest_rms[0]})
                 time.sleep(0.1)
     except Exception as e:
         print(f"Mic error: {e}", file=sys.stderr)
