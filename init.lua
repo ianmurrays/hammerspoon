@@ -8,6 +8,7 @@ local windowManager = require("window_manager")
 local gifFinder = require("gif_finder")
 local screenBlur = require("screen_blur")
 local stt = require("stt")
+local clipboardHistory = require("clipboard_history")
 local unifiedMenu = require("unified_menu")
 
 -- Read Slack token from macOS Keychain
@@ -134,10 +135,14 @@ stt.init({
     llm_api_key = mistralApiKey,
 })
 
--- Initialize Unified Menu (combines Slack Status, Hyperduck, Scratchpad, Screen Blur)
+-- Initialize Clipboard History (Ctrl+Alt+V to show)
+clipboardHistory.init({})
+
+-- Initialize Unified Menu (combines Slack Status, Hyperduck, Scratchpad, Screen Blur, Clipboard History)
 unifiedMenu.init({
     slackStatus = slackStatus,
     hyperduck = hyperduck,
     scratchpad = scratchpad,
-    screenBlur = screenBlur
+    screenBlur = screenBlur,
+    clipboardHistory = clipboardHistory,
 })

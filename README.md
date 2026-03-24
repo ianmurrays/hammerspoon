@@ -14,7 +14,8 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | `battery_indicator` | Shows remaining battery time in menu bar | — |
 | `screen_blur` | Full-screen blur overlay for privacy (downsample trick via `sips`) | Ctrl+Alt+B |
 | `stt` | Local speech-to-text via parakeet-mlx daemon with optional LLM post-processing, audio tones, media pause/resume, and transcription history viewer | fn+Space (toggle) / fn+Shift (hold) / Ctrl+Alt+H (history) |
-| `unified_menu` | Combines Slack Status, Hyperduck, Scratchpad, and Screen Blur into a single menubar item | — |
+| `clipboard_history` | Clipboard history with search, auto-skips password manager entries, 30-day retention | Ctrl+Alt+V |
+| `unified_menu` | Combines Slack Status, Hyperduck, Scratchpad, Screen Blur, and Clipboard History into a single menubar item | — |
 
 ## Hotkeys
 
@@ -33,19 +34,21 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | fn+Space | Toggle speech-to-text recording (press to start, press again to stop and paste) |
 | fn+Shift | Hold-to-talk speech-to-text (hold both to record, release to stop and paste) |
 | Ctrl+Alt+H | Toggle STT transcription history viewer |
+| Ctrl+Alt+V | Toggle clipboard history viewer |
 
 > **Note:** Home = Fn+Left and End = Fn+Right on Mac keyboards.
 
 ## File Structure
 
-Webview modules (`gif_finder`, `slack_status`, `scratchpad`, `stt`) store their HTML, CSS, and JS in separate files under `html/`:
+Webview modules (`gif_finder`, `slack_status`, `scratchpad`, `stt`, `clipboard_history`) store their HTML, CSS, and JS in separate files under `html/`:
 
 ```
 html/
   gif_finder/    — GIF search UI
   slack_status/  — Custom status form
   scratchpad/    — CodeMirror markdown editor
-  stt_history/   — Transcription history viewer
+  stt_history/        — Transcription history viewer
+  clipboard_history/  — Clipboard history viewer
 ```
 
 Each directory contains `index.html`, `style.css`, and `script.js`. At runtime, `html_loader.lua` reads these files and inlines the CSS/JS into the HTML before passing it to `hs.webview:html()`.
@@ -155,6 +158,7 @@ The scratchpad, Hyperduck, and GIF Finder modules store files in iCloud Drive:
 - **Hyperduck:** `~/Library/Mobile Documents/com~apple~CloudDocs/Hyperduck/inbox.txt`
 - **GIF Finder:** `~/Library/Mobile Documents/com~apple~CloudDocs/GifFinder/favorites.json` and `recents.json`
 - **STT:** `~/Library/Mobile Documents/com~apple~CloudDocs/STT/history.txt` — append-only transcription history
+- **Clipboard History:** `~/Library/Mobile Documents/com~apple~CloudDocs/ClipboardHistory/history.json` — clipboard entries (30-day retention)
 
 Hyperduck requires an iPhone Shortcut that appends timestamped URLs (`timestamp|url` format) to the inbox file. URLs older than 7 days are automatically purged.
 

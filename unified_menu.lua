@@ -56,6 +56,18 @@ local function buildUnifiedMenu()
         end
     end
 
+    -- Separator
+    table.insert(menu, { title = "-" })
+
+    -- Clipboard History section
+    table.insert(menu, { title = "Clipboard History", disabled = true })
+    local clipItems = modules.clipboardHistory and modules.clipboardHistory.getMenuItems()
+    if clipItems and type(clipItems) == "table" then
+        for _, item in ipairs(clipItems) do
+            table.insert(menu, item)
+        end
+    end
+
     return menu
 end
 
@@ -82,6 +94,7 @@ function M.init(cfg)
     modules.scratchpad = cfg.scratchpad
     modules.slackStatus = cfg.slackStatus
     modules.screenBlur = cfg.screenBlur
+    modules.clipboardHistory = cfg.clipboardHistory
 
     -- Create menubar
     menubarItem = hs.menubar.new()

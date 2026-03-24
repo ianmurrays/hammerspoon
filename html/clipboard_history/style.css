@@ -1,0 +1,106 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #212121;
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  color: #e0e0e0;
+  padding: 12px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+#filter-box {
+  width: 100%;
+  padding: 10px 14px;
+  font-size: 15px;
+  background: #2c2c2c;
+  border: 1px solid #444;
+  border-radius: 6px;
+  color: #e0e0e0;
+  outline: none;
+  flex-shrink: 0;
+}
+#filter-box:focus { border-color: #6c9bff; }
+#filter-box::placeholder { color: #777; }
+#status {
+  text-align: center;
+  padding: 16px;
+  color: #888;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+#entries {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
+.entry-card {
+  background: #2c2c2c;
+  border-radius: 6px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.entry-card:hover { background: #353535; }
+.entry-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.entry-header .timestamp {
+  font-size: 12px;
+  color: #888;
+}
+.entry-header .app-name {
+  font-size: 11px;
+  color: #999;
+  background: #3a3a3a;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+.entry-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.entry-body .text {
+  flex: 1;
+  font-size: 14px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 4.2em;
+  overflow: hidden;
+}
+.entry-actions {
+  flex-shrink: 0;
+  display: flex;
+  gap: 4px;
+  align-items: flex-start;
+}
+.entry-actions .copy-btn,
+.entry-actions .delete-btn {
+  background: #444;
+  border: none;
+  border-radius: 4px;
+  color: #ccc;
+  font-size: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.entry-actions .copy-btn:hover { background: #555; color: #fff; }
+.entry-actions .copy-btn.copied {
+  background: #2d5a2d;
+  color: #7ddb7d;
+}
+.entry-actions .delete-btn {
+  padding: 4px 8px;
+  color: #666;
+}
+.entry-actions .delete-btn:hover { color: #ff6b6b; background: #3a2020; }
