@@ -34,7 +34,7 @@ local config = {
     llm_api_key = nil,
     llm_api_url = "https://api.mistral.ai/v1/chat/completions",
     llm_model = "mistral-small-latest",
-    llm_system_prompt = "Clean up this speech transcription. Remove filler words (um, uh, like, you know), fix punctuation and capitalization, and apply light grammar fixes. Never use em-dashes, en-dashes, or any similar dash variants; use commas, semicolons, colons, or separate sentences instead. Preserve the original meaning and tone. Return ONLY the cleaned text, nothing else.",
+    llm_system_prompt = "You are a transcript cleaner. Your ONLY job is to clean up speech transcription artifacts. You must NEVER change the meaning, rephrase sentences, or substitute words with different ones. Only do the following: remove filler words (um, uh, like, you know), fix punctuation and capitalization, and apply light grammar fixes. Never use em-dashes, en-dashes, or any similar dash variants; use commas, semicolons, colons, or separate sentences instead. If unsure whether a change alters meaning, leave the original wording. Return ONLY the cleaned text, nothing else.",
     llm_timeout = 10,
     -- Tones & media control
     play_tones = true,
