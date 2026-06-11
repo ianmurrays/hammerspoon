@@ -15,6 +15,7 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | `screen_blur` | Full-screen blur overlay for privacy (downsample trick via `sips`) | Ctrl+Alt+B |
 | `stt` | Local speech-to-text via parakeet-mlx daemon with optional LLM post-processing, audio tones, media pause/resume, and transcription history viewer | fn+Space (toggle) / fn+Shift (hold) / Ctrl+Alt+H (history) |
 | `clipboard_history` | Clipboard history with search, auto-skips password manager entries, 30-day retention | Ctrl+Alt+V |
+| `mouse_grid` | Keyboard-driven mouse (Mouseless-style): full-screen hint grid for click, right/double click, drag & drop, and scrolling | Tap left Cmd |
 | `unified_menu` | Combines Slack Status, Hyperduck, Scratchpad, Screen Blur, and Clipboard History into a single menubar item | — |
 
 ## Hotkeys
@@ -35,8 +36,25 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | fn+Shift | Hold-to-talk speech-to-text (hold both to record, release to stop and paste) |
 | Ctrl+Alt+H | Toggle STT transcription history viewer |
 | Ctrl+Alt+V | Toggle clipboard history viewer |
+| Tap left Cmd | Toggle mouse grid overlay (quick press+release of left Cmd alone) |
 
 > **Note:** Home = Fn+Left and End = Fn+Right on Mac keyboards.
+
+### Mouse Grid (while overlay is up)
+
+Type a cell's two characters (first char = row, home-row keys; second char = column, a–z), then pick a precision point in the subgrid shown inside the cell (`qwert` / `asdfg` / `zxcvb`, laid out spatially) or press Space for the cell center. Modifiers held on the **final** key choose the action:
+
+| Key | Action |
+|---|---|
+| subgrid key / Space | Left click |
+| Shift + final key | Right click |
+| Ctrl + final key | Double click |
+| Alt + final key | Move cursor only (no click) |
+| Cmd + final key | Arm drag (mouse down; overlay stays up — next selection drops) |
+| Backspace | Undo one selection level |
+| Tab | Move overlay to next screen |
+| `,` | Scroll mode: h/j/k/l or arrows scroll, Shift = faster, Esc exits |
+| Esc | Dismiss overlay (cancels an armed drag) |
 
 ## File Structure
 

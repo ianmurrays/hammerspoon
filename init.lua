@@ -9,6 +9,7 @@ local gifFinder = require("gif_finder")
 local screenBlur = require("screen_blur")
 local stt = require("stt")
 local clipboardHistory = require("clipboard_history")
+local mouseGrid = require("mouse_grid")
 local unifiedMenu = require("unified_menu")
 
 -- Read Slack token from macOS Keychain
@@ -137,6 +138,9 @@ stt.init({
 
 -- Initialize Clipboard History (Ctrl+Alt+V to show)
 clipboardHistory.init({})
+
+-- Initialize Mouse Grid (tap left Cmd to toggle keyboard-driven mouse)
+mouseGrid.init({})
 
 -- Initialize Unified Menu (combines Slack Status, Hyperduck, Scratchpad, Screen Blur, Clipboard History)
 unifiedMenu.init({
