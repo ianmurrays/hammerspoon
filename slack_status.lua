@@ -23,7 +23,18 @@ local updateSlackStatus
 -- ============================================
 
 local function getExpirationTimestamp(minutes)
-    return os.time() + (minutes * 60)
+    -- Round up to the next 5-minute boundary so Slack shows a clean expiry time
+    local ts = os.time() + (minutes * 60)
+    local interval = 5 * 60
+    return ts + (interval - ts % interval) % interval
+end
+
+local function cancelPendingWifiUpdate()
+    if wifiChangeTimer then
+        wifiChangeTimer:stop()
+        wifiChangeTimer = nil
+        print("Cancelled pending WiFi update")
+    end
 end
 
 local function getEndOfDayTimestamp()
@@ -64,6 +75,7 @@ local function showCustomStatusForm()
             elseif tonumber(body.expiration) and tonumber(body.expiration) > 0 then
                 expiration = getExpirationTimestamp(tonumber(body.expiration))
             end
+            cancelPendingWifiUpdate()
             updateSlackStatus(body.text, body.emoji, expiration, true, "✏️")
             if customStatusWebview then
                 customStatusWebview:delete()
@@ -239,6 +251,7 @@ local function buildMenu()
                 local expiration = status.useEndOfDay and getEndOfDayTimestamp() or 0
                 -- Extract emoji from name (everything before first space)
                 local menuEmoji = status.name:match("^(.-) ") or "💬"
+                cancelPendingWifiUpdate()
                 updateSlackStatus(status.text, status.emoji, expiration, true, menuEmoji)
             end
         })
@@ -265,6 +278,7 @@ local function buildMenu()
             print("Clearing Slack status from menu bar")
             manualStatusActive = false
             stopStatusRefreshTimer()
+            cancelPendingWifiUpdate()
             updateSlackStatus("", "", 0, false, "💬")
         end
     })
@@ -308,10 +322,7 @@ wifiChanged = function()
     end
 
     -- Cancel any pending WiFi change update (debounce rapid events)
-    if wifiChangeTimer then
-        wifiChangeTimer:stop()
-        print("Cancelled pending WiFi update (debounce)")
-    end
+    cancelPendingWifiUpdate()
 
     local currentNetwork = hs.wifi.currentNetwork()
 
@@ -324,11 +335,16 @@ wifiChanged = function()
 
             -- Delay the update to allow network connectivity to stabilize
             wifiChangeTimer = hs.timer.doAfter(config.wifiChangeDelay, function()
+                wifiChangeTimer = nil
+                -- A manual status may have been set while we were waiting
+                if manualStatusActive then
+                    print("Manual status set during delay, skipping WiFi-based update")
+                    return
+                end
                 local expiration = getExpirationTimestamp(15)
                 print("Updating Slack status: " .. status.text .. " (expires in 15 min)")
                 updateSlackStatus(status.text, status.emoji, expiration, false, status.menuEmoji)
                 startStatusRefreshTimer()
-                wifiChangeTimer = nil
             end)
         else
             print("Network '" .. currentNetwork .. "' not recognized")

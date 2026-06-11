@@ -272,7 +272,8 @@ end
 pushHistoryToJS = function()
     if not historyWebview or not historyVisible then return end
     local entries = parseHistory()
-    local json = hs.json.encode(entries):gsub("'", "\\'")
+    -- Escape for embedding in a single-quoted JS string literal (backslashes first)
+    local json = hs.json.encode(entries):gsub("\\", "\\\\"):gsub("'", "\\'"):gsub("\n", "\\n"):gsub("\r", "\\r")
     historyWebview:evaluateJavaScript(string.format("if (window.loadEntries) window.loadEntries('%s')", json))
 end
 
@@ -428,6 +429,7 @@ handleMessage = function(data)
 
     if msg.type == "ready" then
         if connectTimer then connectTimer:stop(); connectTimer = nil end
+        if state == "idle" then return end -- session was cancelled while the daemon was starting
         if state == "starting" then
             state = "recording"
             updatePill("recording")
@@ -797,7 +799,16 @@ function M.init(cfg)
                 elseif not bothHeld and fnShiftHeld then
                     fnShiftHeld = false
                     print("stt: fn+shift released, state=" .. state)
-                    if state == "recording" then sendCommand("stop") end
+                    if state == "recording" then
+                        sendCommand("stop")
+                    elseif state == "starting" then
+                        -- Released before the daemon was ready: abort, or the eventual
+                        -- "ready" would start an unattended recording with no stop queued
+                        print("stt: released during startup, aborting")
+                        hideOverlay()
+                        cleanup()
+                        resetIdleTimer()
+                    end
                 end
             end
 

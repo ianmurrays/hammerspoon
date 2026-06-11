@@ -221,11 +221,17 @@ end
 -- HTML template
 
 local function buildHTML(content)
-    local escaped = content:gsub("\\", "\\\\"):gsub("`", "\\`"):gsub("${", "\\${")
+    -- "</" must become "<\/" so content containing "</script>" can't terminate the inlined script block
+    local escaped = content:gsub("\\", "\\\\"):gsub("`", "\\`"):gsub("${", "\\${"):gsub("</", "<\\/")
     return htmlLoader.load("scratchpad", { ["{{CONTENT}}"] = escaped })
 end
 
 -- WebView management
+
+-- Sentinel returned when the editor JS never initialized (e.g. CodeMirror CDN unreachable);
+-- saving in that state would overwrite the file with empty content
+local EDITOR_NOT_READY = "__SCRATCHPAD_EDITOR_NOT_READY__"
+local GET_CONTENT_JS = "window.getEditorValue ? window.getEditorValue() : '" .. EDITOR_NOT_READY .. "'"
 
 local function hideWebview()
     if webview and isVisible then
@@ -268,9 +274,9 @@ local function showWebview()
                 if action == "closing" then
                     -- Save before hiding
                     webview:evaluateJavaScript(
-                        "window.getEditorValue ? window.getEditorValue() : ''",
+                        GET_CONTENT_JS,
                         function(result, error)
-                            if result then saveFile(result) end
+                            if result and result ~= EDITOR_NOT_READY then saveFile(result) end
                         end
                     )
                     isVisible = false
@@ -313,9 +319,9 @@ local function toggleWebview()
         isTransitioning = true
         if webview then
             webview:evaluateJavaScript(
-                "window.getEditorValue ? window.getEditorValue() : ''",
+                GET_CONTENT_JS,
                 function(result, error)
-                    if result then saveFile(result) end
+                    if result and result ~= EDITOR_NOT_READY then saveFile(result) end
                     hideWebview()
                     isTransitioning = false
                 end

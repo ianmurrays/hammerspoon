@@ -567,6 +567,7 @@ freeKeyImpl = function(ev)
     end
 
     if kc == kmap.space then
+        if flags.fn then return "pass" end -- fn+Space is the STT toggle; don't swallow it
         if repeating then return end -- no machine-gun clicks
         local pos = hs.mouse.absolutePosition()
         if flags.cmd or freeButtonHeld then
@@ -590,13 +591,15 @@ freeKeyImpl = function(ev)
 end
 
 handleFreeKey = function(ev)
-    local ok, err = pcall(freeKeyImpl, ev)
+    local ok, result = pcall(freeKeyImpl, ev)
     if not ok then
         -- A live error here would leave the tap consuming the keyboard
-        print("mouse_grid: error in free key handler: " .. tostring(err))
+        print("mouse_grid: error in free key handler: " .. tostring(result))
         pcall(exitFreeMode)
+        return true
     end
-    return true -- consume everything while free mode is active
+    if result == "pass" then return false end -- let the event reach other taps (e.g. STT)
+    return true -- consume everything else while free mode is active
 end
 
 -- Hints mode: Shortcat-style element hints. The focused window's
@@ -907,7 +910,11 @@ enterHintsMode = function()
         hideOverlay()
     end
     local app = hs.application.frontmostApplication()
-    currentScreen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
+    -- Anchor to the screen of the window being scanned, not the cursor's —
+    -- they can differ, and a wrong clip rect rejects every scanned element
+    local focusedWindow = hs.window.focusedWindow()
+    currentScreen = (focusedWindow and focusedWindow:screen())
+        or hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
     mode = "hints"
     hints = {}
     hintsTyped = ""
