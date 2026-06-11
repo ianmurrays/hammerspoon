@@ -15,7 +15,7 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | `screen_blur` | Full-screen blur overlay for privacy (downsample trick via `sips`) | Ctrl+Alt+B |
 | `stt` | Local speech-to-text via parakeet-mlx daemon with optional LLM post-processing, audio tones, media pause/resume, and transcription history viewer | fn+Space (toggle) / fn+Shift (hold) / Ctrl+Alt+H (history) |
 | `clipboard_history` | Clipboard history with search, auto-skips password manager entries, 30-day retention | Ctrl+Alt+V |
-| `mouse_grid` | Keyboard-driven mouse (Mouseless-style): full-screen hint grid for click, right/double click, drag & drop, and scrolling | Tap left Cmd |
+| `mouse_grid` | Keyboard-driven mouse (Mouseless-style): full-screen hint grid for click, right/double click, drag & drop, and scrolling; free mode for smooth relative cursor movement | Tap left Cmd (grid) / Tap left Alt (free) |
 | `unified_menu` | Combines Slack Status, Hyperduck, Scratchpad, Screen Blur, and Clipboard History into a single menubar item | — |
 
 ## Hotkeys
@@ -37,12 +37,13 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | Ctrl+Alt+H | Toggle STT transcription history viewer |
 | Ctrl+Alt+V | Toggle clipboard history viewer |
 | Tap left Cmd | Toggle mouse grid overlay (quick press+release of left Cmd alone) |
+| Tap left Alt | Toggle free mouse mode (relative cursor movement, no overlay) |
 
 > **Note:** Home = Fn+Left and End = Fn+Right on Mac keyboards.
 
 ### Mouse Grid (while overlay is up)
 
-Type a cell's two characters (first char = row, home-row keys; second char = column, a–z), then pick a precision point in the subgrid shown inside the cell (`qwert` / `asdfg` / `zxcvb`, laid out spatially) or press Space for the cell center. Modifiers held on the **final** key choose the action:
+Type a cell's two characters (first char = row, a–z top-to-bottom; second char = column, keyboard rows `qwert`/`asdfg`/`zxcvb` left-to-right). Cells are wide horizontal rectangles (26 rows × 15 columns). Then pick a precision point in the subgrid shown inside the cell (`qwert` / `asdfg` / `zxcvb`, laid out spatially) or press Space for the cell center. A hint toast at the bottom of the screen shows the available keys at every step. Modifiers held on the **final** key choose the action:
 
 | Key | Action |
 |---|---|
@@ -55,6 +56,22 @@ Type a cell's two characters (first char = row, home-row keys; second char = col
 | Tab | Move overlay to next screen |
 | `,` | Scroll mode: h/j/k/l or arrows scroll, Shift = faster, Esc exits |
 | Esc | Dismiss overlay (cancels an armed drag) |
+
+### Free Mode (tap left Alt)
+
+Moves the real cursor with the keyboard — no overlay, just a hint toast. Exits on Esc or after 10s of inactivity. Tapping left Cmd switches to the grid; tapping left Alt while the grid is up switches to free mode.
+
+| Key | Action |
+|---|---|
+| i / j / k / l | Move cursor up/left/down/right (hold; diagonals work) |
+| Shift (held) | Move faster (4×) |
+| Ctrl (held) | Move slower (0.25×, precision) |
+| Space | Left click (mode stays active) |
+| Shift+Space | Right click |
+| Ctrl+Space | Double click |
+| Cmd+Space | Drag toggle — press to grab, move, press Space again to drop |
+| The 4 keys right of N | Scroll up/down/left/right (Shift = faster) — matched by physical position, so `m , . /` on US, `m , . -` on Spanish ISO; the toast shows the keys for your layout |
+| Esc | Exit free mode (releases a held drag) |
 
 ## File Structure
 
