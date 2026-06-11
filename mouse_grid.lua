@@ -36,7 +36,7 @@ local config = {
     freeSlowMultiplier = 0.25, -- free mode speed with Ctrl held
     freeIdleTimeout = 10,    -- seconds of inactivity before free mode exits
     colors = {
-        background = { red = 0, green = 0, blue = 0, alpha = 0.18 },
+        background = { red = 0, green = 0, blue = 0, alpha = 0.3 },
         gridLine = { white = 1, alpha = 0.25 },
         label = { white = 1, alpha = 0.85 },
         rowHighlight = { red = 1, green = 0.8, blue = 0.2, alpha = 0.25 },
