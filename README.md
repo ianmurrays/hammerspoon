@@ -52,7 +52,8 @@ Type a cell's two characters (first char = row, a–z top-to-bottom; second char
 | Ctrl + final key | Double click |
 | Alt + final key | Move cursor only (no click) |
 | Cmd + final key | Arm drag (mouse down; overlay stays up — next selection drops) |
-| Backspace | Undo one selection level |
+| Hold final key | Nudge: cursor jumps to the point and arrows/i/j/k/l move it in small steps (Shift = bigger); releasing the key performs the action (modifiers apply at release) |
+| Backspace | Undo one selection level (or cancel a nudge) |
 | Tab | Move overlay to next screen |
 | `,` | Scroll mode: h/j/k/l or arrows scroll, Shift = faster, Esc exits |
 | Esc | Dismiss overlay (cancels an armed drag) |

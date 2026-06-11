@@ -4,6 +4,9 @@
 -- Modifiers on the final key: Shift = right click, Ctrl = double click,
 -- Alt = move only, Cmd = arm drag (next selection drops). Backspace undoes
 -- one level, Tab moves to the next screen, "," enters scroll mode, Esc exits.
+-- Nudge: HOLD the final key instead of tapping it, then use arrows or
+-- i/j/k/l to move the cursor in small steps (Shift = bigger); releasing the
+-- held key executes the action at the nudged position.
 -- Tap left Alt alone for free mode: i/j/k/l move the cursor smoothly
 -- (Shift = fast, Ctrl = slow), Space clicks (Shift = right, Ctrl = double,
 -- Cmd = drag toggle), m/,/.// scroll, Esc or idle timeout exits.
@@ -26,6 +29,7 @@ local config = {
     tapTimeout = 0.25,   -- max seconds for a modifier tap to trigger
     scrollKey = ",",
     scrollStep = 40,     -- pixels per scroll keypress (Shift = x5)
+    nudgeStep = 2,       -- pixels per nudge keypress while holding the final key (Shift = x5)
     dragSteps = 5,       -- interpolation steps for drag movement
     freeSpeed = 600,         -- free mode cursor speed, px/sec
     freeFastMultiplier = 4,  -- free mode speed with Shift held
@@ -53,6 +57,7 @@ local currentScreen = nil
 local mode = "idle"      -- idle | first | second | sub | scroll | free
 local selRow, selCol = nil, nil
 local dragOrigin = nil   -- global point while a grid drag is armed
+local nudgeKey = nil     -- subgrid char (or "space") held for nudging
 local tapPending = nil   -- { kc, downAt } while a tap-candidate modifier is held
 
 -- Free mode state
@@ -74,6 +79,7 @@ local updateFreeBadge, resetFreeIdle, toggleFreeDrag
 local enterFreeMode, exitFreeMode, toggleFreeMode
 local freeKeyImpl, handleFreeKey
 local performAction, drawFocus, addBadge, showOnScreen, moveToNextScreen
+local beginNudge, endNudgeCancel
 local showOverlay, hideOverlay, toggleOverlay
 local modalKeyImpl, handleModalKey, onlyFlag, handleActivationEvent
 
@@ -564,14 +570,38 @@ end
 local MODE_TIPS = {
     first = "type 2-char cell · , scroll · Tab screen · Esc close",
     second = "column letter · Bksp back",
-    sub = "pick point (qwert/asdfg/zxcvb) · Space center · ⇧ right ⌃ dbl ⌥ move ⌘ drag",
+    sub = "pick point (qwert/asdfg/zxcvb) · Space center · hold to nudge · ⇧ right ⌃ dbl ⌥ move ⌘ drag",
     scroll = "SCROLL · h/j/k/l · ⇧ fast · , or Esc back",
 }
+local NUDGE_TIPS = "NUDGE · ijkl/arrows move (⇧ big) · release key to act (⇧ right ⌃ dbl ⌥ move ⌘ drag) · Bksp back"
+
+beginNudge = function(key, point)
+    nudgeKey = key
+    hs.mouse.absolutePosition(point)
+    if gridCanvas then gridCanvas:hide() end -- unobstructed view; cursor is the indicator
+    drawFocus()
+end
+
+-- Cancel or finish a nudge while the overlay stays up: restore the grid
+endNudgeCancel = function()
+    nudgeKey = nil
+    if gridCanvas then
+        gridCanvas:show()
+        if focusCanvas then focusCanvas:orderAbove(gridCanvas) end
+    end
+    drawFocus()
+end
 
 drawFocus = function()
     if not focusCanvas then return end
     local f = currentScreen:fullFrame()
     local elems = {}
+
+    if nudgeKey then -- badge only: the real cursor is the indicator
+        addBadge(elems, f, (dragOrigin and "DRAG · " or "") .. NUDGE_TIPS)
+        focusCanvas:replaceElements(table.unpack(elems))
+        return
+    end
 
     if dragOrigin then
         local ox, oy = dragOrigin.x - f.x, dragOrigin.y - f.y
@@ -699,6 +729,7 @@ hideOverlay = function()
     if focusCanvas then focusCanvas:delete(); focusCanvas = nil end
     mode = "idle"
     selRow, selCol = nil, nil
+    nudgeKey = nil
     print("mouse_grid: overlay hidden")
 end
 
@@ -717,11 +748,12 @@ end
 -- Modal key handling (consumes every keyDown while the overlay is up)
 
 modalKeyImpl = function(ev)
-    -- This tap consumes keyDowns before the activation tap can see them, so
+    -- This tap consumes keys before the activation tap can see them, so
     -- cancel a pending tap here too — otherwise Cmd+finalKey (arm drag)
     -- ends with the Cmd release reading as a tap and toggling the overlay off
     tapPending = nil
 
+    local isDown = ev:getType() == etypes.keyDown
     local kc = ev:getKeyCode()
     local flags = ev:getFlags()
     -- Resolve the key from its keycode (modifier-independent): character
@@ -732,6 +764,45 @@ modalKeyImpl = function(ev)
         ch = ev:getCharacters(true)
     end
     ch = ch and ch:lower() or ""
+
+    -- Nudge: the final key is being held; arrows/ijkl move the cursor,
+    -- releasing the held key acts at the nudged position
+    if nudgeKey then
+        if not isDown then
+            if ch == nudgeKey or (nudgeKey == "space" and kc == kmap.space) then
+                nudgeKey = nil
+                performAction(hs.mouse.absolutePosition(), flags)
+                if mode ~= "idle" and gridCanvas then
+                    -- a drag was armed: overlay stays up, bring the grid back
+                    gridCanvas:show()
+                    if focusCanvas then focusCanvas:orderAbove(gridCanvas) end
+                end
+            end
+            return
+        end
+        if kc == kmap.escape then
+            nudgeKey = nil
+            cancelDrag()
+            hideOverlay()
+            return
+        end
+        if kc == kmap.delete then -- cancel the nudge, back to the subgrid
+            endNudgeCancel()
+            return
+        end
+        local step = config.nudgeStep * (flags.shift and 5 or 1)
+        local dx, dy = 0, 0
+        if ch == "i" or kc == kmap.up then dy = -step
+        elseif ch == "k" or kc == kmap.down then dy = step
+        elseif ch == "j" or kc == kmap.left then dx = -step
+        elseif ch == "l" or kc == kmap.right then dx = step
+        else return end -- includes autorepeats of the held key
+        local pos = hs.mouse.absolutePosition()
+        hs.mouse.absolutePosition({ x = pos.x + dx, y = pos.y + dy })
+        return
+    end
+
+    if not isDown then return end -- keyUps only matter while nudging
 
     if mode == "scroll" then
         if kc == kmap.escape or ch == config.scrollKey then
@@ -766,7 +837,7 @@ modalKeyImpl = function(ev)
     end
 
     if mode == "sub" and kc == kmap.space then
-        performAction(cellCenter(selRow, selCol), flags)
+        beginNudge("space", cellCenter(selRow, selCol))
         return
     end
 
@@ -794,7 +865,7 @@ modalKeyImpl = function(ev)
         for sr, rowKeys in ipairs(config.subgridKeys) do
             local sc = rowKeys:find(ch, 1, true)
             if sc then
-                performAction(subCellPoint(selRow, selCol, sr, sc), flags)
+                beginNudge(ch, subCellPoint(selRow, selCol, sr, sc))
                 return
             end
         end
@@ -872,7 +943,7 @@ function M.init(cfg)
             .. "' collides with hint alphabets")
     end
 
-    modalTap = hs.eventtap.new({ etypes.keyDown }, handleModalKey)
+    modalTap = hs.eventtap.new({ etypes.keyDown, etypes.keyUp }, handleModalKey)
     freeTap = hs.eventtap.new({ etypes.keyDown, etypes.keyUp }, handleFreeKey)
     activationTap = hs.eventtap.new({
         etypes.flagsChanged, etypes.keyDown,
