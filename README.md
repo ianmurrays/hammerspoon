@@ -15,7 +15,7 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | `screen_blur` | Full-screen blur overlay for privacy (downsample trick via `sips`) | Ctrl+Alt+B |
 | `stt` | Local speech-to-text via parakeet-mlx daemon with optional LLM post-processing, audio tones, media pause/resume, and transcription history viewer | fn+Space (toggle) / fn+Shift (hold) / Ctrl+Alt+H (history) |
 | `clipboard_history` | Clipboard history with search, auto-skips password manager entries, 30-day retention | Ctrl+Alt+V |
-| `mouse_grid` | Keyboard-driven mouse (Mouseless-style): full-screen hint grid for click, right/double click, drag & drop, and scrolling; free mode for smooth relative cursor movement | Tap left Cmd (grid) / Tap left Alt (free) |
+| `mouse_grid` | Keyboard-driven mouse (Mouseless-style): full-screen hint grid for click, right/double click, drag & drop, and scrolling; element hints mode (Shortcat-style, via the Accessibility API); free mode for smooth relative cursor movement | Tap left Cmd (grid) / Double-tap left Cmd (hints) / Tap left Alt (free) |
 | `unified_menu` | Combines Slack Status, Hyperduck, Scratchpad, Screen Blur, and Clipboard History into a single menubar item | — |
 
 ## Hotkeys
@@ -37,6 +37,7 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | Ctrl+Alt+H | Toggle STT transcription history viewer |
 | Ctrl+Alt+V | Toggle clipboard history viewer |
 | Tap left Cmd | Toggle mouse grid overlay (quick press+release of left Cmd alone) |
+| Double-tap left Cmd | Element hints mode (Shortcat-style: labels on clickable UI elements) |
 | Tap left Alt | Toggle free mouse mode (relative cursor movement, no overlay) |
 
 > **Note:** Home = Fn+Left and End = Fn+Right on Mac keyboards.
@@ -57,6 +58,36 @@ Type a cell's two characters (first char = row, a–z top-to-bottom; second char
 | Tab | Move overlay to next screen |
 | `,` | Scroll mode: h/j/k/l or arrows scroll, Shift = faster, Esc exits |
 | Esc | Dismiss overlay (cancels an armed drag) |
+
+### Hints Mode (double-tap left Cmd)
+
+Shortcat-style element hints: the focused window's accessibility tree is scanned for actionable elements (buttons, links, text fields, checkboxes, menu items…) and each one gets a short yellow label. Typing a label's characters filters the hints live (non-matching ones dim out); completing a label performs the action at that element's center. No screenshots involved — element positions come straight from the macOS Accessibility API.
+
+| Key | Action |
+|---|---|
+| label chars | Filter hints / act when a label is completed |
+| Space | Search mode: type the element's text (title/label/value) to find it |
+| Shift + final char | Right click |
+| Ctrl + final char | Double click |
+| Alt + final char | Move cursor only (no click) |
+| Cmd + final char | Arm drag (mouse down; hints reappear — next label drops) |
+| Backspace | Un-type one label character |
+| Esc | Exit hints mode (cancels an armed drag) |
+
+While searching, matching elements are outlined instead of labelled and typing goes to the query:
+
+| Key | Action |
+|---|---|
+| any text | Filter elements by their accessibility text (case-insensitive substring) |
+| Tab / Shift+Tab | Select next / previous match (red outline) |
+| Enter | Act on the selected match — same modifiers as above (Shift right, Ctrl double, Alt move, Cmd drag) |
+| Backspace | Delete a query character (on an empty query: back to labels) |
+| Esc | Back to label mode (Esc again exits hints) |
+
+Notes:
+- Scans the focused window of the frontmost app. A "scanning…" toast shows while the (asynchronous) traversal runs; very large windows are capped at 400 hints.
+- Chromium browsers (Chrome, Arc, Brave, Edge, Vivaldi) and Electron apps (Slack, Discord, VS Code, Notion) hide web/page content from the accessibility tree by default. The module temporarily enables the relevant accessibility attribute (`AXEnhancedUserInterface` / `AXManualAccessibility`) while hints are up and restores it on exit, since leaving it on can make window snapping glitchy. The first scan in these apps may take one extra ~200ms rescan while the tree populates. The app lists are configurable (`enhancedUIApps` / `electronApps`).
+- Single-tap left Cmd while hints are up switches to the grid; tap left Alt to switch to free mode.
 
 ### Free Mode (tap left Alt)
 

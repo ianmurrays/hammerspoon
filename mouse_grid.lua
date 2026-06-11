@@ -10,6 +10,11 @@
 -- Tap left Alt alone for free mode: i/j/k/l move the cursor smoothly
 -- (Shift = fast, Ctrl = slow), Space clicks (Shift = right, Ctrl = double,
 -- Cmd = drag toggle), m/,/.// scroll, Esc or idle timeout exits.
+-- Double-tap left Cmd for hints mode (Shortcat-style): actionable UI
+-- elements of the focused window are scanned via the Accessibility API and
+-- labelled; typing a label clicks the element (same final-key modifiers as
+-- the grid). Space enters search: type the element's text to filter, Tab
+-- cycles matches, Enter acts. Backspace un-types, Esc exits.
 
 local M = {}
 
@@ -35,6 +40,27 @@ local config = {
     freeFastMultiplier = 4,  -- free mode speed with Shift held
     freeSlowMultiplier = 0.25, -- free mode speed with Ctrl held
     freeIdleTimeout = 10,    -- seconds of inactivity before free mode exits
+    hintChars = "fjdkslaghrueiwoqp", -- hints mode label alphabet (home-row first)
+    doubleTapWindow = 0.3,   -- max seconds between two Cmd taps for hints mode
+    hintsMaxDepth = 60,      -- AX traversal depth limit (browser trees are deep)
+    hintsMaxElements = 400,  -- cap on rendered hints (also stops the search early)
+    hintsRescanDelay = 0.2,  -- delay before the one-shot rescan after an AX fixup
+    hintsMinElements = 5,    -- fewer first-pass results than this triggers the rescan
+    hintsRoles = {           -- AX roles considered actionable (set-style, overridable)
+        AXButton = true, AXLink = true, AXMenuItem = true, AXMenuItemCheckbox = true,
+        AXCheckBox = true, AXRadioButton = true, AXPopUpButton = true, AXComboBox = true,
+        AXTextField = true, AXTextArea = true, AXMenuButton = true,
+        AXDisclosureTriangle = true, AXSlider = true, AXCell = true,
+    },
+    enhancedUIApps = {       -- Chromium: needs AXEnhancedUserInterface for web content
+        ["com.google.Chrome"] = true, ["company.thebrowser.Browser"] = true,
+        ["com.brave.Browser"] = true, ["com.microsoft.edgemac"] = true,
+        ["org.chromium.Chromium"] = true, ["com.vivaldi.Vivaldi"] = true,
+    },
+    electronApps = {         -- Electron: AXManualAccessibility (no window-manager side effects)
+        ["com.tinyspeck.slackmacgap"] = true, ["com.hnc.Discord"] = true,
+        ["com.microsoft.VSCode"] = true, ["notion.id"] = true,
+    },
     colors = {
         background = { red = 0, green = 0, blue = 0, alpha = 0.3 },
         gridLine = { white = 1, alpha = 0.25 },
@@ -43,6 +69,10 @@ local config = {
         subBackground = { red = 0.1, green = 0.1, blue = 0.15, alpha = 0.3 },
         subLabel = { red = 1, green = 0.85, blue = 0.3, alpha = 1 },
         badge = { red = 1, green = 0.3, blue = 0.3, alpha = 0.9 },
+        hintBackground = { red = 1, green = 0.85, blue = 0.3, alpha = 0.95 },
+        hintLabel = { red = 0.1, green = 0.1, blue = 0.1, alpha = 1 },
+        hintTyped = { red = 0.8, green = 0.1, blue = 0.1, alpha = 1 },
+        hintDimAlpha = 0.15, -- alpha multiplier for hints filtered out by typing
     },
 }
 
@@ -59,6 +89,22 @@ local selRow, selCol = nil, nil
 local dragOrigin = nil   -- global point while a grid drag is armed
 local nudgeKey = nil     -- subgrid char (or "space") held for nudging
 local tapPending = nil   -- { kc, downAt } while a tap-candidate modifier is held
+
+-- Hints mode state
+local hintsTap = nil          -- dedicated modal eventtap while hints are up
+local hintsCanvas = nil       -- hint-badge canvas
+local hints = {}              -- array of { label, frame (global), cx, cy }
+local hintsTyped = ""         -- label prefix typed so far
+local hintsQuery = nil        -- search text while the search sub-mode is active (nil = label mode)
+local hintsSelIdx = 1         -- selected match while searching (Tab cycles)
+local hintsSearch = nil       -- in-flight elementSearch object (supports :cancel())
+local hintsScanGen = 0        -- generation counter: drops stale async callbacks
+local hintsWinFrame = nil     -- focused window AXFrame at scan time (clip rect)
+local hintsNotice = nil       -- status string shown in the toast instead of tips
+local hintsAXFixup = nil      -- { axApp, attr } to restore on exit
+local hintsRescanTimer = nil  -- one-shot rescan timer after an AX fixup
+local hintsRescanned = false  -- only rescan once per session
+local lastCmdTapAt = 0        -- when the last lone-Cmd tap completed (double-tap detect)
 
 -- Free mode state
 local freeTap = nil
@@ -82,11 +128,21 @@ local performAction, drawFocus, addBadge, showOnScreen, moveToNextScreen
 local beginNudge, endNudgeCancel
 local showOverlay, hideOverlay, toggleOverlay
 local modalKeyImpl, handleModalKey, onlyFlag, handleActivationEvent
+local generateHintLabels, hintsRoot, applyAXFixup, restoreAXFixup
+local startHintsScan, onHintsScanResults, drawHints
+local armHintsDrag, performHintsAction
+local enterHintsMode, exitHintsMode, toggleHints
+local hintsKeyImpl, handleHintsKey
+local dismissActiveOverlay
 
 -- Tap-to-activate specs: actions are closures so the forward-declared
 -- locals resolve at call time, not at table construction
 local tapSpecs = {
-    [KEYCODE_LEFT_CMD] = { flag = "cmd", action = function() toggleOverlay() end },
+    [KEYCODE_LEFT_CMD] = {
+        flag = "cmd",
+        action = function() toggleOverlay() end,
+        doubleAction = function() toggleHints() end, -- two taps within doubleTapWindow
+    },
     [KEYCODE_LEFT_ALT] = { flag = "alt", action = function() toggleFreeMode() end },
 }
 
@@ -210,7 +266,7 @@ postClick = function(point, kind)
 end
 
 doClick = function(point, kind)
-    hideOverlay()
+    dismissActiveOverlay()
     -- Small delay so the overlay is gone before the click lands
     hs.timer.doAfter(0.05, function()
         hs.mouse.absolutePosition(point)
@@ -231,7 +287,7 @@ end
 finishDrag = function(point)
     local origin = dragOrigin
     dragOrigin = nil
-    hideOverlay()
+    dismissActiveOverlay()
     hs.timer.doAfter(0.05, function()
         for i = 1, config.dragSteps do
             local t = i / config.dragSteps
@@ -449,6 +505,10 @@ end
 toggleFreeMode = function()
     if mode == "free" then
         exitFreeMode()
+    elseif mode == "hints" then -- switch hints -> free
+        cancelDrag()
+        exitHintsMode()
+        enterFreeMode()
     elseif mode ~= "idle" then -- grid is up: switch to free mode
         cancelDrag()
         hideOverlay()
@@ -462,6 +522,7 @@ freeKeyImpl = function(ev)
     -- Consumed keys never reach the activation tap, so cancel pending taps
     -- here too (same reason as modalKeyImpl)
     tapPending = nil
+    lastCmdTapAt = 0
 
     local isDown = ev:getType() == etypes.keyDown
     local kc = ev:getKeyCode()
@@ -525,7 +586,479 @@ handleFreeKey = function(ev)
     return true -- consume everything while free mode is active
 end
 
--- Action dispatch: modifiers are read from the final keystroke only
+-- Hints mode: Shortcat-style element hints. The focused window's
+-- accessibility tree is searched (async, so big browser trees don't
+-- beachball Hammerspoon) for actionable roles; each hit gets a short label
+-- drawn at its top-left. Typing a label filters live; completing one acts
+-- at the element's center with the same final-key modifiers as the grid.
+
+local HINTS_TIPS = "type label · Space search · ⇧ right ⌃ dbl ⌥ move ⌘ drag · Bksp undo · Esc"
+
+-- Prefix-free label set (Vimium-style trie expansion): pop the oldest
+-- (shortest) label and replace it with its children — removing the parent
+-- is what keeps the set prefix-free, so an exact match can fire immediately
+-- even while longer labels exist
+generateHintLabels = function(n)
+    local chars = {}
+    for i = 1, #config.hintChars do chars[i] = config.hintChars:sub(i, i) end
+    local queue, head = {}, 1
+    for _, c in ipairs(chars) do queue[#queue + 1] = c end
+    while #queue - head + 1 < n do
+        local parent = queue[head]
+        head = head + 1
+        for _, c in ipairs(chars) do queue[#queue + 1] = parent .. c end
+    end
+    local labels = {}
+    for i = head, math.min(#queue, head + n - 1) do labels[#labels + 1] = queue[i] end
+    return labels
+end
+
+-- Chromium hides web content from the AX tree unless AXEnhancedUserInterface
+-- is set; Electron uses AXManualAccessibility instead. Enabled only while
+-- hints mode is active (AXEnhancedUserInterface is the VoiceOver flag and is
+-- known to glitch window snapping), and only for known bundle IDs.
+applyAXFixup = function(app)
+    hintsAXFixup = nil
+    if not app then return end
+    local bundle = app:bundleID()
+    local attr = (config.enhancedUIApps[bundle] and "AXEnhancedUserInterface")
+        or (config.electronApps[bundle] and "AXManualAccessibility")
+    if not attr then return end
+    local axApp = hs.axuielement.applicationElement(app)
+    if not axApp then return end
+    local ok, prev = pcall(axApp.attributeValue, axApp, attr)
+    if ok and prev == true then return end -- already on: nothing to restore
+    pcall(axApp.setAttributeValue, axApp, attr, true)
+    hintsAXFixup = { axApp = axApp, attr = attr }
+    print("mouse_grid: enabled " .. attr .. " on " .. tostring(bundle))
+end
+
+restoreAXFixup = function()
+    if not hintsAXFixup then return end
+    pcall(hintsAXFixup.axApp.setAttributeValue, hintsAXFixup.axApp, hintsAXFixup.attr, false)
+    hintsAXFixup = nil
+end
+
+hintsRoot = function(app)
+    if not app then return nil end
+    local axApp = hs.axuielement.applicationElement(app)
+    if not axApp then return nil end
+    local ok, win = pcall(axApp.attributeValue, axApp, "AXFocusedWindow")
+    if ok and win then return win end
+    local w = app:focusedWindow()
+    return w and hs.axuielement.windowElement(w) or nil
+end
+
+-- Searchable text for an element (Shortcat-style search sub-mode)
+local elementText = function(el)
+    local parts = {}
+    for _, attr in ipairs({ "AXTitle", "AXDescription", "AXValue", "AXPlaceholderValue" }) do
+        local ok, v = pcall(el.attributeValue, el, attr)
+        if ok and type(v) == "string" and #v > 0 then
+            parts[#parts + 1] = v:sub(1, 200)
+        end
+    end
+    return table.concat(parts, " "):lower()
+end
+
+-- Indices into `hints` matching the current search query (plain substring)
+local hintsMatchIndices = function()
+    local q = hintsQuery or ""
+    local out = {}
+    for i, h in ipairs(hints) do
+        if q == "" or (h.text and h.text:find(q, 1, true)) then
+            out[#out + 1] = i
+        end
+    end
+    return out
+end
+
+drawHints = function()
+    if not hintsCanvas then return end
+    local f = currentScreen:fullFrame()
+    local elems = {}
+    local bg, fg, typedColor = config.colors.hintBackground,
+        config.colors.hintLabel, config.colors.hintTyped
+    local cw, bh = 7, 16 -- Menlo 11pt advance width, badge height
+
+    local matchList = hintsQuery and hintsMatchIndices() or nil
+    if matchList then
+        -- Search sub-mode: outline matches instead of labels (typing goes
+        -- to the query); the Tab-selected match gets the accent outline
+        local sel = matchList[math.min(math.max(hintsSelIdx, 1), math.max(#matchList, 1))]
+        for _, i in ipairs(matchList) do
+            local h = hints[i]
+            local isSel = (i == sel)
+            elems[#elems + 1] = {
+                type = "rectangle", action = "stroke",
+                strokeColor = isSel and config.colors.badge or bg,
+                strokeWidth = isSel and 2.5 or 1.5,
+                roundedRectRadii = { xRadius = 3, yRadius = 3 },
+                frame = { x = h.frame.x - f.x, y = h.frame.y - f.y,
+                    w = h.frame.w, h = h.frame.h },
+            }
+        end
+        local label = string.format("%sSEARCH · \"%s\" · %d hits · ⇥ next · ⏎ act (⇧ right ⌃ dbl ⌥ move ⌘ drag) · Esc back",
+            dragOrigin and "DRAG · " or "", hintsQuery, #matchList)
+        if hintsNotice then label = "HINTS · " .. hintsNotice end
+        addBadge(elems, f, label)
+        hintsCanvas:replaceElements(table.unpack(elems))
+        return
+    end
+
+    for _, h in ipairs(hints) do
+        local matched = h.label:sub(1, #hintsTyped) == hintsTyped
+        local alpha = matched and 1 or config.colors.hintDimAlpha
+        local bw = 8 + #h.label * cw
+        local bx = math.max(0, math.min(h.frame.x - f.x, f.w - bw))
+        local by = math.max(0, math.min(h.frame.y - f.y, f.h - bh))
+        elems[#elems + 1] = {
+            type = "rectangle", action = "fill",
+            fillColor = { red = bg.red, green = bg.green, blue = bg.blue,
+                alpha = (bg.alpha or 1) * alpha },
+            roundedRectRadii = { xRadius = 3, yRadius = 3 },
+            frame = { x = bx, y = by, w = bw, h = bh },
+        }
+        local tx = bx + 4
+        if matched and #hintsTyped > 0 then -- typed prefix in accent color
+            elems[#elems + 1] = {
+                type = "text", text = h.label:sub(1, #hintsTyped),
+                textSize = 11, textFont = "Menlo", textColor = typedColor,
+                frame = { x = tx, y = by + 1.5, w = #hintsTyped * cw + 2, h = 14 },
+            }
+            tx = tx + #hintsTyped * cw
+        end
+        local rest = matched and h.label:sub(#hintsTyped + 1) or h.label
+        if #rest > 0 then
+            elems[#elems + 1] = {
+                type = "text", text = rest,
+                textSize = 11, textFont = "Menlo",
+                textColor = { red = fg.red, green = fg.green, blue = fg.blue,
+                    alpha = (fg.alpha or 1) * alpha },
+                frame = { x = tx, y = by + 1.5, w = #rest * cw + 4, h = 14 },
+            }
+        end
+    end
+
+    local label
+    if hintsNotice then
+        label = "HINTS · " .. hintsNotice
+    elseif hintsSearch then
+        label = "HINTS · scanning…"
+    else
+        label = (dragOrigin and "HINTS · DRAG · " or "HINTS · ") .. HINTS_TIPS
+    end
+    addBadge(elems, f, label)
+
+    hintsCanvas:replaceElements(table.unpack(elems))
+end
+
+onHintsScanResults = function(results)
+    -- Clip to focused window ∩ current screen: drops offscreen and
+    -- scrolled-out elements that still report a frame
+    local f = currentScreen:fullFrame()
+    local clip = { x = f.x, y = f.y, w = f.w, h = f.h }
+    local wf = hintsWinFrame
+    if wf then
+        local x1, y1 = math.max(clip.x, wf.x), math.max(clip.y, wf.y)
+        local x2 = math.min(clip.x + clip.w, wf.x + wf.w)
+        local y2 = math.min(clip.y + clip.h, wf.y + wf.h)
+        if x2 > x1 and y2 > y1 then
+            clip = { x = x1, y = y1, w = x2 - x1, h = y2 - y1 }
+        end
+    end
+
+    local list, seen = {}, {}
+    for i = 1, #results do
+        local el = results[i]
+        -- pcall everything: AX elements die mid-flight when apps mutate their UI
+        local ok, fr = pcall(el.attributeValue, el, "AXFrame")
+        if ok and type(fr) == "table" and fr.w and fr.w > 2 and fr.h > 2 then
+            local cx, cy = fr.x + fr.w / 2, fr.y + fr.h / 2
+            if cx >= clip.x and cx < clip.x + clip.w
+                and cy >= clip.y and cy < clip.y + clip.h then
+                -- Dedupe by rounded frame: kills nested AXCell duplicates
+                local key = math.floor(fr.x) .. ":" .. math.floor(fr.y)
+                    .. ":" .. math.floor(fr.w) .. ":" .. math.floor(fr.h)
+                if not seen[key] then
+                    seen[key] = true
+                    list[#list + 1] = {
+                        frame = { x = fr.x, y = fr.y, w = fr.w, h = fr.h },
+                        cx = cx, cy = cy,
+                        text = elementText(el), -- for the search sub-mode
+                    }
+                end
+            end
+        end
+    end
+
+    -- Chromium/Electron populate the web subtree lazily after the AX
+    -- attribute flips, so a thin first pass gets one delayed rescan
+    if #list < config.hintsMinElements and hintsAXFixup and not hintsRescanned then
+        hintsRescanned = true
+        hintsRescanTimer = hs.timer.doAfter(config.hintsRescanDelay, function()
+            hintsRescanTimer = nil
+            if mode == "hints" then
+                startHintsScan(hs.application.frontmostApplication())
+                drawHints()
+            end
+        end)
+        return
+    end
+
+    table.sort(list, function(a, b) -- reading order, so labels are predictable
+        if a.frame.y ~= b.frame.y then return a.frame.y < b.frame.y end
+        return a.frame.x < b.frame.x
+    end)
+    while #list > config.hintsMaxElements do list[#list] = nil end
+
+    local labels = generateHintLabels(#list)
+    hints = {}
+    for i, item in ipairs(list) do
+        hints[i] = { label = labels[i], frame = item.frame,
+            cx = item.cx, cy = item.cy, text = item.text }
+    end
+    hintsTyped = ""
+    hintsSelIdx = 1
+    if #hints == 0 then
+        hintsNotice = "no clickable elements found"
+        local gen = hintsScanGen
+        hs.timer.doAfter(1.2, function()
+            if gen == hintsScanGen and mode == "hints" then exitHintsMode() end
+        end)
+    else
+        hintsNotice = nil
+    end
+    drawHints()
+    print(string.format("mouse_grid: hints found %d elements", #hints))
+end
+
+startHintsScan = function(app)
+    hintsScanGen = hintsScanGen + 1
+    local gen = hintsScanGen
+    local root = hintsRoot(app)
+    if not root then
+        hintsNotice = "no focusable window"
+        drawHints()
+        hs.timer.doAfter(1.2, function()
+            if gen == hintsScanGen and mode == "hints" then exitHintsMode() end
+        end)
+        return
+    end
+    local okF, wf = pcall(root.attributeValue, root, "AXFrame")
+    hintsWinFrame = (okF and type(wf) == "table") and wf or nil
+    local roles = config.hintsRoles
+    hintsSearch = root:elementSearch(
+        function(_, results)
+            if gen ~= hintsScanGen or mode ~= "hints" then return end -- stale
+            hintsSearch = nil
+            local ok, err = pcall(onHintsScanResults, results)
+            if not ok then
+                print("mouse_grid: hints scan error: " .. tostring(err))
+                pcall(exitHintsMode)
+            end
+        end,
+        function(el) -- criteria: actionable role?
+            local ok, role = pcall(el.attributeValue, el, "AXRole")
+            return ok and role ~= nil and roles[role] == true
+        end,
+        { count = config.hintsMaxElements, depth = config.hintsMaxDepth }
+    )
+end
+
+armHintsDrag = function(point)
+    hs.mouse.absolutePosition(point)
+    postMouse(etypes.leftMouseDown, point, 1)
+    dragOrigin = point
+    hintsTyped = "" -- full hint set comes back for picking the drop target
+    if hintsQuery then hintsQuery = "" end -- stay in search, clear the query
+    hintsSelIdx = 1
+    drawHints()
+    print(string.format("mouse_grid: drag armed at %.0f,%.0f (hints)", point.x, point.y))
+end
+
+performHintsAction = function(point, flags)
+    if not dragOrigin and flags.cmd then
+        armHintsDrag(point)
+    else
+        -- finishDrag/doClick/alt-move all dismiss via dismissActiveOverlay
+        performAction(point, flags)
+    end
+end
+
+enterHintsMode = function()
+    if mode == "free" then
+        exitFreeMode()
+    elseif mode ~= "idle" then
+        cancelDrag()
+        hideOverlay()
+    end
+    local app = hs.application.frontmostApplication()
+    currentScreen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
+    mode = "hints"
+    hints = {}
+    hintsTyped = ""
+    hintsQuery = nil
+    hintsSelIdx = 1
+    hintsNotice = nil
+    hintsRescanned = false
+    applyAXFixup(app)
+    hintsCanvas = hs.canvas.new(currentScreen:fullFrame())
+    hintsCanvas:level(hs.canvas.windowLevels.screenSaver)
+    hintsCanvas:behavior({ "canJoinAllSpaces", "stationary" })
+    hintsCanvas:show()
+    hintsTap:start()
+    startHintsScan(app)
+    drawHints() -- "scanning…" badge until results arrive
+    print("mouse_grid: hints mode on (" .. (app and app:name() or "?") .. ")")
+end
+
+-- Idempotent: also called from pcall error paths and async timers
+exitHintsMode = function()
+    hintsScanGen = hintsScanGen + 1 -- invalidate in-flight callbacks
+    if hintsSearch then pcall(hintsSearch.cancel, hintsSearch); hintsSearch = nil end
+    if hintsRescanTimer then hintsRescanTimer:stop(); hintsRescanTimer = nil end
+    if hintsTap then hintsTap:stop() end
+    if hintsCanvas then hintsCanvas:delete(); hintsCanvas = nil end
+    restoreAXFixup()
+    hints = {}
+    hintsTyped = ""
+    hintsQuery = nil
+    hintsSelIdx = 1
+    hintsNotice = nil
+    hintsWinFrame = nil
+    -- dragOrigin intentionally untouched: finishDrag reads it after dismissal
+    -- and Esc runs its own cancelDrag()
+    mode = "idle"
+    print("mouse_grid: hints mode off")
+end
+
+toggleHints = function()
+    if mode == "hints" then
+        cancelDrag()
+        exitHintsMode()
+    else
+        enterHintsMode()
+    end
+end
+
+hintsKeyImpl = function(ev)
+    -- This tap eats keys before the activation tap sees them, so cancel
+    -- pending taps here too (same reason as modalKeyImpl) — and clear the
+    -- double-tap timestamp so a stale half-double-tap can't fire later
+    tapPending = nil
+    lastCmdTapAt = 0
+
+    if ev:getType() ~= etypes.keyDown then return end
+
+    local kc = ev:getKeyCode()
+    local flags = ev:getFlags()
+    local repeating = (ev:getProperty(eprops.keyboardEventAutorepeat) or 0) ~= 0
+    if repeating and kc ~= kmap.delete and kc ~= kmap.tab then return end
+
+    -- Resolve from keycode (modifier-independent), same as modalKeyImpl:
+    -- character translation is unreliable while Cmd/Ctrl are held
+    local ch = kmap[kc]
+    if type(ch) ~= "string" or #ch ~= 1 then
+        ch = ev:getCharacters(true)
+    end
+    ch = ch and ch:lower() or ""
+
+    if kc == kmap.escape then
+        if hintsQuery then -- leave search, back to labels
+            hintsQuery, hintsSelIdx = nil, 1
+            drawHints()
+        else
+            cancelDrag()
+            exitHintsMode()
+        end
+        return
+    end
+
+    if hintsQuery then -- search sub-mode: typing edits the query
+        if kc == kmap["return"] or kc == kmap.padenter then
+            local matchList = hintsMatchIndices()
+            if #matchList > 0 then
+                local h = hints[matchList[math.min(math.max(hintsSelIdx, 1), #matchList)]]
+                performHintsAction({ x = h.cx, y = h.cy }, flags)
+            end
+            return
+        end
+        if kc == kmap.tab then -- cycle through matches (Shift = backwards)
+            local n = #hintsMatchIndices()
+            if n > 0 then
+                hintsSelIdx = flags.shift and ((hintsSelIdx - 2) % n + 1)
+                    or (hintsSelIdx % n + 1)
+                drawHints()
+            end
+            return
+        end
+        if kc == kmap.delete then
+            if #hintsQuery > 0 then
+                hintsQuery = hintsQuery:sub(1, -2)
+            else
+                hintsQuery = nil -- Backspace on empty query leaves search
+            end
+            hintsSelIdx = 1
+            drawHints()
+            return
+        end
+        if flags.cmd or flags.ctrl or flags.alt then return end
+        if #ch == 1 and ch:match("[%g ]") then
+            hintsQuery = hintsQuery .. ch
+            hintsSelIdx = 1
+            drawHints()
+        end
+        return
+    end
+
+    if kc == kmap.space then -- enter search sub-mode (Shortcat-style)
+        hintsQuery, hintsSelIdx = "", 1
+        drawHints()
+        return
+    end
+
+    if kc == kmap.delete then -- Backspace: un-type one label char
+        hintsTyped = hintsTyped:sub(1, -2)
+        drawHints()
+        return
+    end
+
+    if ch == "" or not config.hintChars:find(ch, 1, true) then return end
+    local candidate = hintsTyped .. ch
+    local exact, anyPrefix = nil, false
+    for _, h in ipairs(hints) do
+        if h.label == candidate then exact = h end
+        if h.label:sub(1, #candidate) == candidate then anyPrefix = true end
+    end
+    if not anyPrefix then return end -- typo: ignore instead of dead-ending
+    hintsTyped = candidate
+    if exact then -- labels are prefix-free, so an exact match is unique
+        performHintsAction({ x = exact.cx, y = exact.cy }, flags)
+    else
+        drawHints()
+    end
+end
+
+handleHintsKey = function(ev)
+    local ok, err = pcall(hintsKeyImpl, ev)
+    if not ok then
+        -- A live error here would leave the tap consuming the keyboard
+        print("mouse_grid: error in hints key handler: " .. tostring(err))
+        pcall(cancelDrag)
+        pcall(exitHintsMode)
+    end
+    return true -- consume everything while hints mode is active
+end
+
+-- Action dispatch: modifiers are read from the final keystroke only.
+-- doClick/finishDrag/the alt branch run from both grid and hints modes, so
+-- they must tear down whichever overlay is active — calling hideOverlay()
+-- from a hints path would leave hintsTap consuming the keyboard forever.
+
+dismissActiveOverlay = function()
+    if mode == "hints" then exitHintsMode() else hideOverlay() end
+end
 
 performAction = function(point, flags)
     if dragOrigin then
@@ -533,7 +1066,7 @@ performAction = function(point, flags)
     elseif flags.cmd then
         armDrag(point)
     elseif flags.alt then
-        hideOverlay()
+        dismissActiveOverlay()
         hs.timer.doAfter(0.05, function() hs.mouse.absolutePosition(point) end)
         print(string.format("mouse_grid: moved to %.0f,%.0f", point.x, point.y))
     elseif flags.shift then
@@ -737,6 +1270,10 @@ toggleOverlay = function()
     if mode == "free" then -- switch free -> grid
         exitFreeMode()
         showOverlay(hs.mouse.getCurrentScreen())
+    elseif mode == "hints" then -- switch hints -> grid
+        cancelDrag()
+        exitHintsMode()
+        showOverlay(hs.mouse.getCurrentScreen())
     elseif mode ~= "idle" then
         cancelDrag()
         hideOverlay()
@@ -752,6 +1289,7 @@ modalKeyImpl = function(ev)
     -- cancel a pending tap here too — otherwise Cmd+finalKey (arm drag)
     -- ends with the Cmd release reading as a tap and toggling the overlay off
     tapPending = nil
+    lastCmdTapAt = 0 -- typing also breaks a half-finished double tap
 
     local isDown = ev:getType() == etypes.keyDown
     local kc = ev:getKeyCode()
@@ -884,9 +1422,10 @@ handleModalKey = function(ev)
     return true
 end
 
--- Activation: quick tap of left Cmd (grid) or left Alt (free mode) alone —
--- press+release under tapTimeout, cancelled by any other key, modifier,
--- click, or scroll while the candidate key is down
+-- Activation: quick tap of left Cmd (grid; two taps within doubleTapWindow
+-- for hints) or left Alt (free mode) alone — press+release under tapTimeout,
+-- cancelled by any other key, modifier, click, or scroll while the candidate
+-- key is down
 
 onlyFlag = function(flags, want)
     for _, f in ipairs({ "cmd", "alt", "shift", "ctrl", "fn" }) do
@@ -908,18 +1447,32 @@ handleActivationEvent = function(ev)
             elseif not flags[spec.flag] then -- candidate released
                 if tapPending and tapPending.kc == kc
                     and (hs.timer.secondsSinceEpoch() - tapPending.downAt) < config.tapTimeout then
-                    local ok, err = pcall(spec.action)
+                    -- Double tap: a second qualifying tap shortly after the
+                    -- first upgrades to doubleAction (grid flash is fine —
+                    -- the grid canvas is cached and cheap to show)
+                    local now = hs.timer.secondsSinceEpoch()
+                    local action = spec.action
+                    if spec.doubleAction and (now - lastCmdTapAt) < config.doubleTapWindow then
+                        lastCmdTapAt = 0
+                        action = spec.doubleAction
+                    elseif spec.doubleAction then
+                        lastCmdTapAt = now
+                    end
+                    local ok, err = pcall(action)
                     if not ok then print("mouse_grid: toggle error: " .. tostring(err)) end
                 end
                 tapPending = nil
             else
                 tapPending = nil -- another modifier joined while held
+                lastCmdTapAt = 0
             end
         else
             tapPending = nil -- right Cmd / Shift / fn etc. changed
+            lastCmdTapAt = 0
         end
     else
         tapPending = nil -- keyDown, mouse button, or scroll while held
+        lastCmdTapAt = 0
     end
     return false -- never consume; coexists with stt's eventtap
 end
@@ -942,9 +1495,16 @@ function M.init(cfg)
         print("mouse_grid: warning - scrollKey '" .. config.scrollKey
             .. "' collides with hint alphabets")
     end
+    if #config.hintChars < 2 then -- label expansion needs at least 2 chars
+        print("mouse_grid: warning - hintChars too short, using default")
+        config.hintChars = "fjdkslaghrueiwoqp"
+    elseif #config.hintChars < 8 then
+        print("mouse_grid: warning - short hintChars makes hint labels long")
+    end
 
     modalTap = hs.eventtap.new({ etypes.keyDown, etypes.keyUp }, handleModalKey)
     freeTap = hs.eventtap.new({ etypes.keyDown, etypes.keyUp }, handleFreeKey)
+    hintsTap = hs.eventtap.new({ etypes.keyDown, etypes.keyUp }, handleHintsKey)
     activationTap = hs.eventtap.new({
         etypes.flagsChanged, etypes.keyDown,
         etypes.leftMouseDown, etypes.rightMouseDown, etypes.otherMouseDown,
@@ -956,6 +1516,9 @@ function M.init(cfg)
         print("mouse_grid: screen layout changed, flushing canvas cache")
         if mode == "free" then
             exitFreeMode()
+        elseif mode == "hints" then
+            cancelDrag()
+            exitHintsMode()
         elseif mode ~= "idle" then
             cancelDrag()
             hideOverlay()
@@ -965,17 +1528,19 @@ function M.init(cfg)
     end)
     screenWatcher:start()
 
-    print("Mouse Grid loaded (tap left Cmd for grid, left Alt for free mode)")
+    print("Mouse Grid loaded (tap left Cmd for grid, double-tap for hints, left Alt for free mode)")
     return M
 end
 
 function M.stop()
     if mode == "free" then exitFreeMode() end
+    if mode == "hints" then pcall(exitHintsMode) end
     cancelDrag()
     if mode ~= "idle" then hideOverlay() end
     if activationTap then activationTap:stop(); activationTap = nil end
     if modalTap then modalTap:stop(); modalTap = nil end
     if freeTap then freeTap:stop(); freeTap = nil end
+    if hintsTap then hintsTap:stop(); hintsTap = nil end
     if screenWatcher then screenWatcher:stop(); screenWatcher = nil end
     for _, entry in pairs(canvasCache) do entry.canvas:delete() end
     canvasCache = {}
