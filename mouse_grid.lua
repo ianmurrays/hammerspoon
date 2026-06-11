@@ -64,7 +64,8 @@ local config = {
     colors = {
         background = { red = 0, green = 0, blue = 0, alpha = 0.3 },
         gridLine = { white = 1, alpha = 0.25 },
-        label = { white = 1, alpha = 0.85 },
+        label = { white = 1, alpha = 0.9 },
+        labelBackground = { red = 0, green = 0, blue = 0, alpha = 0.55 },
         rowHighlight = { red = 1, green = 0.8, blue = 0.2, alpha = 0.25 },
         subBackground = { red = 0.1, green = 0.1, blue = 0.15, alpha = 0.3 },
         subLabel = { red = 1, green = 0.85, blue = 0.3, alpha = 1 },
@@ -199,8 +200,20 @@ buildGridElements = function(frame)
     end
 
     local fs = math.max(9, math.min(ch * 0.4, cw * 0.55))
+    -- Menlo advance width is ~0.6em; pad so the pill hugs the two letters
+    local bw, bh = fs * 0.6 * 2 + 8, fs * 1.4
     for r = 1, rows do
         for c = 1, cols do
+            elems[#elems + 1] = {
+                type = "rectangle", action = "fill",
+                fillColor = config.colors.labelBackground,
+                roundedRectRadii = { xRadius = 3, yRadius = 3 },
+                frame = {
+                    x = (c - 1) * cw + (cw - bw) / 2,
+                    y = (r - 1) * ch + (ch - bh) / 2,
+                    w = bw, h = bh,
+                },
+            }
             elems[#elems + 1] = {
                 type = "text",
                 text = config.firstChars:sub(r, r) .. config.secondChars:sub(c, c),
