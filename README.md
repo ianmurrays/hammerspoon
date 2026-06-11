@@ -102,7 +102,7 @@ Moves the real cursor with the keyboard — no overlay, just a hint toast. Exits
 | Shift+Space | Right click |
 | Ctrl+Space | Double click |
 | Cmd+Space | Drag toggle — press to grab, move, press Space again to drop |
-| The 4 keys right of N | Scroll up/down/left/right (Shift = faster) — matched by physical position, so `m , . /` on US, `m , . -` on Spanish ISO; the toast shows the keys for your layout |
+| The 4 keys right of N | Scroll left/up/down/right (Shift = faster) — matched by physical position, so `m , . /` on US, `m , . -` on Spanish ISO; the toast shows the keys for your layout |
 | Esc | Exit free mode (releases a held drag) |
 
 ## File Structure

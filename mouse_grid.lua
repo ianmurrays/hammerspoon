@@ -350,9 +350,9 @@ end
 local FREE_MOVE = { h = true, j = true, k = true, l = true }
 -- Scroll keys matched by physical keycode (the four keys right of N), so
 -- they work on any layout: "m,./" on US, "m,.-" on Spanish ISO, etc.
-local FREE_SCROLL_KEYCODES = { 46, 43, 47, 44 } -- up, down, left, right
+local FREE_SCROLL_KEYCODES = { 46, 43, 47, 44 } -- left, up, down, right
 local FREE_SCROLL = {
-    [46] = { 0, 1 }, [43] = { 0, -1 }, [47] = { 1, 0 }, [44] = { -1, 0 },
+    [46] = { 1, 0 }, [43] = { 0, 1 }, [47] = { 0, -1 }, [44] = { -1, 0 },
 }
 local FREE_DRAG_TIPS = "FREE · DRAG · hjkl move · Space drops · Esc cancels"
 
