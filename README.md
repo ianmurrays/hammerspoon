@@ -53,7 +53,7 @@ Type a cell's two characters (first char = row, a–z top-to-bottom; second char
 | Ctrl + final key | Double click |
 | Alt + final key | Move cursor only (no click) |
 | Cmd + final key | Arm drag (mouse down; overlay stays up — next selection drops) |
-| Hold final key | Nudge: cursor jumps to the point and arrows/i/j/k/l move it in small steps (Shift = bigger); releasing the key performs the action (modifiers apply at release) |
+| Hold final key | Nudge: cursor jumps to the point and arrows/h/j/k/l move it in small steps (Shift = bigger); releasing the key performs the action (modifiers apply at release) |
 | Backspace | Undo one selection level (or cancel a nudge) |
 | Tab | Move overlay to next screen |
 | `,` | Scroll mode: h/j/k/l or arrows scroll, Shift = faster, Esc exits |
@@ -95,7 +95,7 @@ Moves the real cursor with the keyboard — no overlay, just a hint toast. Exits
 
 | Key | Action |
 |---|---|
-| i / j / k / l | Move cursor up/left/down/right (hold; diagonals work) |
+| h / j / k / l | Move cursor left/down/up/right (hold; diagonals work) |
 | Shift (held) | Move faster (4×) |
 | Ctrl (held) | Move slower (0.25×, precision) |
 | Space | Left click (mode stays active) |

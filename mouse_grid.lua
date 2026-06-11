@@ -5,9 +5,9 @@
 -- Alt = move only, Cmd = arm drag (next selection drops). Backspace undoes
 -- one level, Tab moves to the next screen, "," enters scroll mode, Esc exits.
 -- Nudge: HOLD the final key instead of tapping it, then use arrows or
--- i/j/k/l to move the cursor in small steps (Shift = bigger); releasing the
+-- h/j/k/l to move the cursor in small steps (Shift = bigger); releasing the
 -- held key executes the action at the nudged position.
--- Tap left Alt alone for free mode: i/j/k/l move the cursor smoothly
+-- Tap left Alt alone for free mode: h/j/k/l move the cursor smoothly
 -- (Shift = fast, Ctrl = slow), Space clicks (Shift = right, Ctrl = double,
 -- Cmd = drag toggle), m/,/.// scroll, Esc or idle timeout exits.
 -- Double-tap left Cmd for hints mode (Shortcat-style): actionable UI
@@ -347,14 +347,14 @@ end
 
 -- Free mode: relative cursor movement, no overlay
 
-local FREE_MOVE = { i = true, j = true, k = true, l = true }
+local FREE_MOVE = { h = true, j = true, k = true, l = true }
 -- Scroll keys matched by physical keycode (the four keys right of N), so
 -- they work on any layout: "m,./" on US, "m,.-" on Spanish ISO, etc.
 local FREE_SCROLL_KEYCODES = { 46, 43, 47, 44 } -- up, down, left, right
 local FREE_SCROLL = {
     [46] = { 0, 1 }, [43] = { 0, -1 }, [47] = { 1, 0 }, [44] = { -1, 0 },
 }
-local FREE_DRAG_TIPS = "FREE · DRAG · ijkl move · Space drops · Esc cancels"
+local FREE_DRAG_TIPS = "FREE · DRAG · hjkl move · Space drops · Esc cancels"
 
 local function freeTipsLabel()
     local keys = ""
@@ -362,7 +362,7 @@ local function freeTipsLabel()
         local ch = kmap[kc]
         keys = keys .. ((type(ch) == "string" and #ch == 1) and ch or "?")
     end
-    return "FREE · ijkl move (⇧ fast ⌃ slow) · Space click (⇧ right ⌃ dbl ⌘ drag) · "
+    return "FREE · hjkl move (⇧ fast ⌃ slow) · Space click (⇧ right ⌃ dbl ⌘ drag) · "
         .. keys .. " scroll · Esc"
 end
 
@@ -393,8 +393,8 @@ freeMoveTick = function()
     local dt = math.min(now - freeLastTick, 0.05) -- clamp stalls
     freeLastTick = now
 
-    local dx = (freeHeld.l and 1 or 0) - (freeHeld.j and 1 or 0)
-    local dy = (freeHeld.k and 1 or 0) - (freeHeld.i and 1 or 0)
+    local dx = (freeHeld.l and 1 or 0) - (freeHeld.h and 1 or 0)
+    local dy = (freeHeld.j and 1 or 0) - (freeHeld.k and 1 or 0)
     if dx == 0 and dy == 0 then return end
     if dx ~= 0 and dy ~= 0 then dx, dy = dx * 0.7071, dy * 0.7071 end
 
@@ -1106,7 +1106,7 @@ local MODE_TIPS = {
     sub = "pick point (qwert/asdfg/zxcvb) · Space center · hold to nudge · ⇧ right ⌃ dbl ⌥ move ⌘ drag",
     scroll = "SCROLL · h/j/k/l · ⇧ fast · , or Esc back",
 }
-local NUDGE_TIPS = "NUDGE · ijkl/arrows move (⇧ big) · release key to act (⇧ right ⌃ dbl ⌥ move ⌘ drag) · Bksp back"
+local NUDGE_TIPS = "NUDGE · hjkl/arrows move (⇧ big) · release key to act (⇧ right ⌃ dbl ⌥ move ⌘ drag) · Bksp back"
 
 beginNudge = function(key, point)
     nudgeKey = key
@@ -1303,7 +1303,7 @@ modalKeyImpl = function(ev)
     end
     ch = ch and ch:lower() or ""
 
-    -- Nudge: the final key is being held; arrows/ijkl move the cursor,
+    -- Nudge: the final key is being held; arrows/hjkl move the cursor,
     -- releasing the held key acts at the nudged position
     if nudgeKey then
         if not isDown then
@@ -1330,9 +1330,9 @@ modalKeyImpl = function(ev)
         end
         local step = config.nudgeStep * (flags.shift and 5 or 1)
         local dx, dy = 0, 0
-        if ch == "i" or kc == kmap.up then dy = -step
-        elseif ch == "k" or kc == kmap.down then dy = step
-        elseif ch == "j" or kc == kmap.left then dx = -step
+        if ch == "k" or kc == kmap.up then dy = -step
+        elseif ch == "j" or kc == kmap.down then dy = step
+        elseif ch == "h" or kc == kmap.left then dx = -step
         elseif ch == "l" or kc == kmap.right then dx = step
         else return end -- includes autorepeats of the held key
         local pos = hs.mouse.absolutePosition()
