@@ -74,6 +74,7 @@ local config = {
         hintLabel = { red = 0.1, green = 0.1, blue = 0.1, alpha = 1 },
         hintTyped = { red = 0.8, green = 0.1, blue = 0.1, alpha = 1 },
         hintDimAlpha = 0.15, -- alpha multiplier for hints filtered out by typing
+        freeGlow = { red = 1, green = 0.85, blue = 0.3, alpha = 0.5 },
     },
 }
 
@@ -110,6 +111,7 @@ local lastCmdTapAt = 0        -- when the last lone-Cmd tap completed (double-ta
 -- Free mode state
 local freeTap = nil
 local freeCanvas = nil       -- badge canvas while free mode is active
+local freeGlowCanvas = nil   -- screen-edge glow canvas while free mode is active
 local freeHeld = {}          -- set: movement key char -> true
 local freeButtonHeld = false -- left button held by free-mode drag toggle
 local freeMoveTimer, freeIdleTimer = nil, nil
@@ -122,7 +124,7 @@ local cellRect, cellCenter, subCellPoint, buildGridElements, getGridCanvas
 local postMouse, postClick, doClick, armDrag, finishDrag, cancelDrag
 local enterScrollMode, exitScrollMode, handleScrollKey, postScroll
 local pointOnScreen, clampToScreens, freeMoveTick, startFreeMove, stopFreeMove
-local updateFreeBadge, resetFreeIdle, toggleFreeDrag
+local updateFreeBadge, updateFreeGlow, resetFreeIdle, toggleFreeDrag
 local enterFreeMode, exitFreeMode, toggleFreeMode
 local freeKeyImpl, handleFreeKey
 local performAction, drawFocus, addBadge, showOnScreen, moveToNextScreen
@@ -442,9 +444,37 @@ stopFreeMove = function()
     if freeMoveTimer then freeMoveTimer:stop(); freeMoveTimer = nil end
 end
 
+-- Soft glow along the screen edges so free mode is obvious at a glance.
+-- hs.canvas has no real blur, so layer inset rounded-rect strokes with a
+-- quadratic alpha falloff to fake it.
+updateFreeGlow = function(scr)
+    if freeGlowCanvas then freeGlowCanvas:delete() end
+    local f = scr:fullFrame()
+    local g = config.colors.freeGlow
+    freeGlowCanvas = hs.canvas.new(f)
+    freeGlowCanvas:level(hs.canvas.windowLevels.screenSaver)
+    freeGlowCanvas:behavior({ "canJoinAllSpaces", "stationary" })
+    local layers, sw = 6, 5
+    local elems = {}
+    for i = 0, layers - 1 do
+        local inset = i * sw + sw / 2
+        elems[#elems + 1] = {
+            type = "rectangle", action = "stroke",
+            strokeColor = { red = g.red, green = g.green, blue = g.blue,
+                alpha = (g.alpha or 1) * (1 - i / layers) ^ 2 },
+            strokeWidth = sw,
+            roundedRectRadii = { xRadius = 12, yRadius = 12 },
+            frame = { x = inset, y = inset, w = f.w - 2 * inset, h = f.h - 2 * inset },
+        }
+    end
+    freeGlowCanvas:appendElements(table.unpack(elems))
+    freeGlowCanvas:show()
+end
+
 updateFreeBadge = function()
     local scr = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
     freeBadgeScreenId = scr:id()
+    updateFreeGlow(scr)
     local f = scr:fullFrame()
     local label = freeButtonHeld and FREE_DRAG_TIPS or freeTipsLabel()
     local w = math.min(f.w - 40, 34 + utf8.len(label) * 8.7)
@@ -509,6 +539,7 @@ exitFreeMode = function()
     if freeIdleTimer then freeIdleTimer:stop(); freeIdleTimer = nil end
     if freeTap then freeTap:stop() end
     if freeCanvas then freeCanvas:delete(); freeCanvas = nil end
+    if freeGlowCanvas then freeGlowCanvas:delete(); freeGlowCanvas = nil end
     freeHeld = {}
     freeBadgeScreenId = nil
     mode = "idle"

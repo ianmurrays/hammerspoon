@@ -91,7 +91,7 @@ Notes:
 
 ### Free Mode (tap left Alt)
 
-Moves the real cursor with the keyboard — no overlay, just a hint toast. Exits on Esc or after 10s of inactivity. Tapping left Cmd switches to the grid; tapping left Alt while the grid is up switches to free mode.
+Moves the real cursor with the keyboard — no grid overlay, just a hint toast and a soft glow around the screen edges so it's obvious the mode is active (the glow follows the cursor across monitors). Exits on Esc or after 10s of inactivity. Tapping left Cmd switches to the grid; tapping left Alt while the grid is up switches to free mode.
 
 | Key | Action |
 |---|---|
