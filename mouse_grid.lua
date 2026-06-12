@@ -455,15 +455,20 @@ updateFreeGlow = function(scr)
     freeGlowCanvas:level(hs.canvas.windowLevels.screenSaver)
     freeGlowCanvas:behavior({ "canJoinAllSpaces", "stationary" })
     local layers, sw = 6, 5
+    -- Radius shrinks with the inset so every layer's corner arc shares one
+    -- center; a fixed radius would leave √2-spaced gaps between the rings
+    -- at the corners
+    local baseRadius = (layers - 1) * sw + 5
     local elems = {}
     for i = 0, layers - 1 do
         local inset = i * sw + sw / 2
+        local r = baseRadius - i * sw
         elems[#elems + 1] = {
             type = "rectangle", action = "stroke",
             strokeColor = { red = g.red, green = g.green, blue = g.blue,
                 alpha = (g.alpha or 1) * (1 - i / layers) ^ 2 },
             strokeWidth = sw,
-            roundedRectRadii = { xRadius = 12, yRadius = 12 },
+            roundedRectRadii = { xRadius = r, yRadius = r },
             frame = { x = inset, y = inset, w = f.w - 2 * inset, h = f.h - 2 * inset },
         }
     end
