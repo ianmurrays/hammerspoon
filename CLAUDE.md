@@ -33,6 +33,7 @@ return M
 | `clipboard_history` | Clipboard history with search, auto-skips password manager entries, 30-day retention | Ctrl+Alt+V |
 | `mouse_grid` | Keyboard-driven mouse (Mouseless-style): full-screen hint grid + in-cell subgrid for click/right/double click, drag & drop, scroll mode, hold-final-key nudges; hints mode (Shortcat-style: async `hs.axuielement` scan of the focused window, prefix-free typed labels, Space → text search with Tab/Enter selection, temporary AXEnhancedUserInterface/AXManualAccessibility fixup for Chromium/Electron); free mode (hjkl relative movement, timer-driven, idle auto-exit, screen-edge glow indicator); context hint toast in all modes; canvas cached per screen, modal eventtaps while active | Tap left Cmd (grid) / Double-tap left Cmd (hints) / Tap left Alt (free) |
 | `unified_menu` | Combines slack_status, hyperduck, scratchpad, screen_blur, and clipboard_history into a single menubar item | — |
+| `whatcable` | Menubar view of USB-C/Thunderbolt port data via the `whatcable` CLI (`hs.task` + `--json`); refreshes on USB/battery/screen watcher events (2s debounce) plus 60s fallback timer | — |
 
 **Unified menu integration:** Modules that appear in the unified menubar expose `getMenuItems()` (returns menu table) and optionally `setUpdateCallback(fn)` so the unified menu can refresh when state changes.
 

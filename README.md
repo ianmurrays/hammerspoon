@@ -18,6 +18,7 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | `mouse_grid` | Keyboard-driven mouse (Mouseless-style): full-screen hint grid for click, right/double click, drag & drop, and scrolling; element hints mode (Shortcat-style, via the Accessibility API); free mode for smooth relative cursor movement | Tap left Cmd (grid) / Double-tap left Cmd (hints) / Tap left Alt (free) |
 | `unified_menu` | Combines Slack Status, Hyperduck, Scratchpad, Screen Blur, and Clipboard History into a single menubar item | — |
 | `eject_lock` | Locks the screen when the Magic Keyboard's Eject key is double-tapped (modifier combos like Cmd+Alt+Eject pass through untouched) | Double-tap Eject |
+| `whatcable` | Menubar view of USB-C/Thunderbolt port data (link speed, cable capabilities, charging, displays, connected device tree, cable trust warnings) via the [whatcable](https://github.com/darrylmorley/whatcable) CLI; refreshes on USB/power/display changes | — |
 
 ## Hotkeys
 
