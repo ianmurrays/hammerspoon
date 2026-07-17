@@ -17,6 +17,7 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | `clipboard_history` | Clipboard history with search, auto-skips password manager entries, 30-day retention | Ctrl+Alt+V |
 | `mouse_grid` | Keyboard-driven mouse (Mouseless-style): full-screen hint grid for click, right/double click, drag & drop, and scrolling; element hints mode (Shortcat-style, via the Accessibility API); free mode for smooth relative cursor movement | Tap left Cmd (grid) / Double-tap left Cmd (hints) / Tap left Alt (free) |
 | `unified_menu` | Combines Slack Status, Hyperduck, Scratchpad, Screen Blur, and Clipboard History into a single menubar item | — |
+| `eject_lock` | Locks the screen when the Magic Keyboard's Eject key is double-tapped (modifier combos like Cmd+Alt+Eject pass through untouched) | Double-tap Eject |
 
 ## Hotkeys
 
@@ -39,6 +40,7 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | Tap left Cmd | Toggle mouse grid overlay (quick press+release of left Cmd alone) |
 | Double-tap left Cmd | Element hints mode (Shortcat-style: labels on clickable UI elements) |
 | Tap left Alt | Toggle free mouse mode (relative cursor movement, no overlay) |
+| Double-tap Eject | Lock screen |
 
 > **Note:** Home = Fn+Left and End = Fn+Right on Mac keyboards.
 
