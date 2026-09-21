@@ -138,6 +138,7 @@ screenBlur.init({})
 local mistralApiKey = getKeychainPassword("mistral-api-key", os.getenv("USER"))
 stt.init({
 	llm_api_key = mistralApiKey,
+	backend = "apple",
 })
 
 -- Initialize Clipboard History (Ctrl+Alt+V to show)

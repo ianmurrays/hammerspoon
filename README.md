@@ -13,7 +13,7 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | `hyperduck` | Monitors iCloud file for URLs sent from iPhone, opens them on Mac | — |
 | `battery_indicator` | Shows remaining battery time in menu bar | — |
 | `screen_blur` | Full-screen blur overlay for privacy (downsample trick via `sips`) | Ctrl+Alt+B |
-| `stt` | Local speech-to-text via parakeet-mlx daemon with optional LLM post-processing, audio tones, media pause/resume, and transcription history viewer | fn+Space (toggle) / fn+Shift (hold) / Ctrl+Alt+H (history) |
+| `stt` | Local speech-to-text via a daemon with 2 backends (parakeet-mlx or Apple SpeechTranscriber), optional LLM post-processing, audio tones, media pause/resume, and transcription history viewer | fn+Space (toggle) / fn+Shift (hold) / Ctrl+Alt+H (history) |
 | `clipboard_history` | Clipboard history with search, auto-skips password manager entries, 30-day retention | Ctrl+Alt+V |
 | `mouse_grid` | Keyboard-driven mouse (Mouseless-style): full-screen hint grid for click, right/double click, drag & drop, and scrolling; element hints mode (Shortcat-style, via the Accessibility API); free mode for smooth relative cursor movement | Tap left Cmd (grid) / Double-tap left Cmd (hints) / Tap left Alt (free) |
 | `unified_menu` | Combines Slack Status, Hyperduck, Scratchpad, Screen Blur, Clipboard History, and Keyboard Lock into a single menubar item | — |
@@ -158,7 +158,7 @@ security add-generic-password -a "$USER" -s "mistral-api-key" -w "YOUR_API_KEY"
 
 ### STT Daemon
 
-The speech-to-text module requires a local Python daemon running `parakeet-mlx`:
+The speech-to-text module requires a local Python daemon. The default backend is `parakeet-mlx`:
 
 ```bash
 cd ~/.hammerspoon/stt-daemon
@@ -174,6 +174,24 @@ launchctl load ~/Library/LaunchAgents/com.local.stt-daemon.plist
 ```
 
 Logs are written to `~/Library/Logs/stt-daemon.log`.
+
+#### Apple SpeechTranscriber Backend (Optional)
+
+On macOS 26 or later, the daemon can use the on-device Apple SpeechTranscriber in place of `parakeet-mlx`. The daemon records the audio as before, then runs the `apple-stt` Swift CLI on the WAV file. The Parakeet model does not load with this backend. The backend uses the `en-US` locale and does not detect the language.
+
+1. Build the CLI:
+   ```bash
+   cd ~/.hammerspoon/stt-daemon
+   swiftc -O -target arm64-apple-macos26.0 apple_stt.swift -o apple-stt
+   ```
+2. Run the CLI once on a test file. If the `en-US` model is not installed, the CLI downloads it now:
+   ```bash
+   say -o /tmp/stt-test.wav --data-format=LEI16@16000 "This is a test." && ./apple-stt /tmp/stt-test.wav
+   ```
+3. Set `backend = "apple"` in the `stt.init` call in `init.lua`.
+4. Reload the Hammerspoon config.
+
+To use `parakeet-mlx` again, set `backend = "parakeet"` (the default) and reload the config.
 
 #### LLM Post-Processing (Optional)
 

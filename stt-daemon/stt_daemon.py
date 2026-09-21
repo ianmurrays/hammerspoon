@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-"""TCP daemon for speech-to-text using parakeet-mlx.
+"""TCP daemon for speech-to-text.
 
-Holds the Parakeet model in memory. Records audio on command,
-transcribes the full recording on stop, returns the result.
+Records audio on command, transcribes the full recording on stop,
+returns the result. Two backends (--backend):
+  parakeet (default): holds the parakeet-mlx model in memory.
+  apple: runs the apple-stt CLI (Apple SpeechTranscriber, macOS 26+)
+         on the recorded WAV. Build it first:
+         swiftc -O -target arm64-apple-macos26.0 apple_stt.swift -o apple-stt
 
 Protocol:
   Server -> Client: {"type": "ready"}
@@ -14,24 +18,28 @@ Protocol:
   Server -> Client: {"type": "status", "model_loaded": bool, "recording": bool}
 """
 
+import argparse
 import json
 import os
 import socket
+import subprocess
 import sys
 import tempfile
 import threading
 import time
 import wave
 
-import mlx.core as mx
 import numpy as np
 import sounddevice as sd
-from parakeet_mlx import from_pretrained
-from parakeet_mlx.audio import get_logmel
+
+# mlx and parakeet_mlx are imported only for the parakeet backend,
+# so that the apple backend starts faster.
 
 # Globals
 model = None
 sample_rate = None
+backend = "parakeet"
+APPLE_STT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "apple-stt")
 
 
 def send_json(conn, obj):
@@ -59,6 +67,19 @@ def write_temp_wav(audio_array, sr):
     except Exception as e:
         print(f"Failed to save WAV: {e}", file=sys.stderr)
         return None
+
+
+def transcribe_apple(wav_path):
+    """Transcribe a WAV file with the apple-stt CLI. Raises on failure."""
+    if not wav_path:
+        raise RuntimeError("No WAV file to transcribe")
+    # TimeoutExpired propagates to the caller's error path.
+    proc = subprocess.run(
+        [APPLE_STT, wav_path], capture_output=True, text=True, timeout=60
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or f"apple-stt exited {proc.returncode}")
+    return proc.stdout.strip()
 
 
 def recording_session(conn, stop_event):
@@ -133,10 +154,16 @@ def recording_session(conn, stop_event):
     send_json(conn, {"type": "transcribing"})
 
     try:
-        audio_mx = mx.array(audio)
-        mel = get_logmel(audio_mx, model.preprocessor_config)
-        results = model.generate(mel)
-        text = results[0].text if results else ""
+        if backend == "apple":
+            text = transcribe_apple(wav_path)
+        else:
+            import mlx.core as mx
+            from parakeet_mlx.audio import get_logmel
+
+            audio_mx = mx.array(audio)
+            mel = get_logmel(audio_mx, model.preprocessor_config)
+            results = model.generate(mel)
+            text = results[0].text if results else ""
         print(f"Result: '{text[:200]}'", file=sys.stderr)
         send_json(conn, {"type": "final", "text": text, "wav_path": wav_path})
     except Exception as e:
@@ -207,7 +234,7 @@ def handle_client(conn, addr):
                         conn,
                         {
                             "type": "status",
-                            "model_loaded": model is not None,
+                            "model_loaded": backend == "apple" or model is not None,
                             "recording": recording_thread is not None
                             and recording_thread.is_alive(),
                         },
@@ -233,16 +260,33 @@ def handle_client(conn, addr):
 
 
 def main():
-    global model, sample_rate
+    global model, sample_rate, backend
 
-    print("Loading parakeet-mlx model...", file=sys.stderr)
-    try:
-        model = from_pretrained("mlx-community/parakeet-tdt-0.6b-v3")
-        sample_rate = model.preprocessor_config.sample_rate
-    except Exception as e:
-        print(f"Failed to load model: {e}", file=sys.stderr)
-        sys.exit(1)
-    print(f"Model loaded (sample_rate={sample_rate})", file=sys.stderr)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--backend", choices=["parakeet", "apple"], default="parakeet")
+    backend = parser.parse_args().backend
+
+    if backend == "apple":
+        if not os.access(APPLE_STT, os.X_OK):
+            print(
+                f"{APPLE_STT} not found. Build it with: swiftc -O -target "
+                "arm64-apple-macos26.0 apple_stt.swift -o apple-stt",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        sample_rate = 16000
+        print("Using Apple SpeechTranscriber backend", file=sys.stderr)
+    else:
+        print("Loading parakeet-mlx model...", file=sys.stderr)
+        try:
+            from parakeet_mlx import from_pretrained
+
+            model = from_pretrained("mlx-community/parakeet-tdt-0.6b-v3")
+            sample_rate = model.preprocessor_config.sample_rate
+        except Exception as e:
+            print(f"Failed to load model: {e}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Model loaded (sample_rate={sample_rate})", file=sys.stderr)
 
     host, port = "127.0.0.1", 9876
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

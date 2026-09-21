@@ -29,7 +29,7 @@ return M
 | `hyperduck` | Monitors iCloud file for URLs sent from iPhone, opens them on Mac | — |
 | `battery_indicator` | Shows remaining battery time in menu bar | — |
 | `screen_blur` | Full-screen blur overlay for privacy (downsample trick via `sips`) | Ctrl+Alt+B |
-| `stt` | Local speech-to-text via parakeet-mlx TCP daemon (auto-managed), with audio tones, media pause/resume, and history viewer | fn+Space (toggle) / fn+Shift (hold) / Ctrl+Alt+H (history) |
+| `stt` | Local speech-to-text via TCP daemon (auto-managed) with 2 backends: parakeet-mlx (default) or Apple SpeechTranscriber via the `stt-daemon/apple-stt` Swift CLI (`backend = "apple"`, macOS 26+), with audio tones, media pause/resume, and history viewer | fn+Space (toggle) / fn+Shift (hold) / Ctrl+Alt+H (history) |
 | `clipboard_history` | Clipboard history with search, auto-skips password manager entries, 30-day retention | Ctrl+Alt+V |
 | `mouse_grid` | Keyboard-driven mouse (Mouseless-style): full-screen hint grid + in-cell subgrid for click/right/double click, drag & drop, scroll mode, hold-final-key nudges; hints mode (Shortcat-style: async `hs.axuielement` scan of the focused window, prefix-free typed labels, Space → text search with Tab/Enter selection, temporary AXEnhancedUserInterface/AXManualAccessibility fixup for Chromium/Electron); free mode (hjkl relative movement, timer-driven, idle auto-exit, screen-edge glow indicator); context hint toast in all modes; canvas cached per screen, modal eventtaps while active | Tap left Cmd (grid) / Double-tap left Cmd (hints) / Tap left Alt (free) |
 | `unified_menu` | Combines slack_status, hyperduck, scratchpad, screen_blur, and clipboard_history into a single menubar item | — |

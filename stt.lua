@@ -1,5 +1,5 @@
 -- Speech-to-Text Module for Hammerspoon
--- Records audio via a local parakeet-mlx daemon, transcribes on stop.
+-- Records audio via a local daemon, transcribes on stop (parakeet-mlx or Apple SpeechTranscriber).
 -- Daemon is started on demand and stopped after idle timeout.
 -- Toggle recording with fn+Space, hold-to-talk with fn+Shift.
 -- History viewer: Ctrl+Alt+H (configurable via history_hotkey)
@@ -7,6 +7,7 @@
 -- Config options (passed via init(cfg)):
 --   host              = string   (default: "127.0.0.1")
 --   port              = number   (default: 9876)
+--   backend           = "parakeet" or "apple" (default: "parakeet"; "apple" needs macOS 26+)
 --   paste_method      = "clipboard" or "keystrokes"
 --   idle_timeout      = number   (seconds, default: 300)
 --   llm_api_key       = string   (default: nil, disabled)
@@ -30,6 +31,7 @@ local config = {
     idle_timeout = 5 * 60,
     daemon_cmd = "/opt/homebrew/bin/uv",
     daemon_dir = os.getenv("HOME") .. "/.hammerspoon/stt-daemon",
+    backend = "parakeet",
     -- LLM post-processing (nil api_key = disabled)
     llm_api_key = nil,
     llm_api_url = "https://api.mistral.ai/v1/chat/completions",
@@ -97,7 +99,7 @@ startDaemon = function()
         function(task, stdout, stderr)
             return true -- discard streaming output
         end,
-        {"run", "stt_daemon.py"}
+        {"run", "stt_daemon.py", "--backend", config.backend}
     )
     daemonTask:setWorkingDirectory(config.daemon_dir)
     daemonTask:start()
@@ -591,7 +593,7 @@ updatePill = function(pillState)
             color = {white = 0.7},
             paragraphStyle = {alignment = "center"},
         })
-        canvas[3].text = hs.styledtext.new("Loading model…", {
+        canvas[3].text = hs.styledtext.new(config.backend == "apple" and "Starting…" or "Loading model…", {
             font = {name = ".AppleSystemUIFont", size = 14},
             color = {white = 0.7},
         })
