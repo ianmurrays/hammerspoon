@@ -76,21 +76,67 @@ loadFromDisk = function()
     end
 end
 
--- Persist current entries to JSON file on disk
-persistToDisk = function()
-    hs.fs.mkdir(DATA_DIR)
+-- Persist current entries to JSON file on disk.
+-- DATA_FILE lives in iCloud Drive, where a write can block while iCloud has the file
+-- coordinated. Blocking the Lua thread also stalls every eventtap (stt's keyDown/flagsChanged
+-- tap), which freezes all keyboard input. So saves are debounced, the JSON goes to a local
+-- temp file, and a background /bin/mv moves it into iCloud off the main thread.
+local SAVE_DEBOUNCE = 1.0
+local TMP_FILE = (hs.fs.temporaryDirectory() or "/tmp/"):gsub("/?$", "/") .. "hs_clipboard_history.json"
+local saveTimer, saveTask = nil, nil
+local dirty = false
+
+local function writeTmp()
     local ok, encoded = pcall(hs.json.encode, entries)
     if not ok then
         print("clipboard_history: failed to encode entries: " .. tostring(encoded))
-        return
+        return false
     end
-    local f = io.open(DATA_FILE, "w")
+    local f = io.open(TMP_FILE, "w")
     if not f then
-        print("clipboard_history: failed to open file for writing: " .. DATA_FILE)
-        return
+        print("clipboard_history: failed to open temp file: " .. TMP_FILE)
+        return false
     end
     f:write(encoded)
     f:close()
+    return true
+end
+
+local function flushAsync()
+    saveTimer = nil
+    if saveTask and saveTask:isRunning() then
+        return -- dirty stays true; the running task's callback will reschedule
+    end
+    dirty = false
+    if not writeTmp() then return end
+    saveTask = hs.task.new("/bin/mv", function(exitCode, _, stdErr)
+        saveTask = nil
+        if exitCode ~= 0 then
+            print("clipboard_history: background save failed: " .. tostring(stdErr))
+        end
+        if dirty then persistToDisk() end
+    end, { "-f", TMP_FILE, DATA_FILE })
+    if not saveTask:start() then
+        saveTask = nil
+        print("clipboard_history: could not start background save")
+    end
+end
+
+-- Synchronous save, only for shutdown where blocking is acceptable
+local function flushSync()
+    if saveTimer then saveTimer:stop(); saveTimer = nil end
+    if not dirty then return end
+    dirty = false
+    local ok, encoded = pcall(hs.json.encode, entries)
+    if not ok then return end
+    local f = io.open(DATA_FILE, "w")
+    if f then f:write(encoded); f:close() end
+end
+
+persistToDisk = function()
+    dirty = true
+    if saveTimer then saveTimer:stop() end
+    saveTimer = hs.timer.doAfter(SAVE_DEBOUNCE, flushAsync)
 end
 
 -- Remove entries older than max_age_days
@@ -300,8 +346,16 @@ function M.init(cfg)
     cfg = cfg or {}
     for k, v in pairs(cfg) do config[k] = v end
 
+    hs.fs.mkdir(DATA_DIR)
     loadFromDisk()
     cleanupOld()
+
+    -- Flush any pending debounced save when Hammerspoon quits or reloads
+    local prevShutdown = hs.shutdownCallback
+    hs.shutdownCallback = function()
+        flushSync()
+        if prevShutdown then prevShutdown() end
+    end
 
     watcher = hs.pasteboard.watcher.new(onClipboardChange)
     -- NOTE: interval() is a global setting that affects all pasteboard watchers
@@ -319,6 +373,7 @@ function M.stop()
     if watcher then watcher:stop(); watcher = nil end
     if hotkeyBind then hotkeyBind:delete(); hotkeyBind = nil end
     if cleanupTimer then cleanupTimer:stop(); cleanupTimer = nil end
+    flushSync()
     if webview then webview:delete(); webview = nil end
     webviewVisible = false
     entries = {}
