@@ -475,6 +475,19 @@ handleMessage = function(data)
             resetIdleTimer()
         end
 
+    elseif msg.type == "partial" then
+        -- Live transcript (apple backend): show the last 5 words in the pill.
+        if state == "recording" and canvas then
+            local words = {}
+            for word in msg.text:gmatch("%S+") do words[#words + 1] = word end
+            local tail = table.concat(words, " ", math.max(1, #words - 4))
+            canvas[3].text = hs.styledtext.new((#words > 5 and "…" or "") .. tail, {
+                font = {name = ".AppleSystemUIFont", size = 14},
+                color = {white = 1},
+                paragraphStyle = {lineBreak = "truncateHead"},
+            })
+        end
+
     elseif msg.type == "audio_level" then
         table.insert(levelBuf, msg.rms or 0)
         if #levelBuf > 5 then table.remove(levelBuf, 1) end
@@ -519,7 +532,8 @@ showPill = function(pillState)
 
     local screen = hs.screen.mainScreen()
     local sf = screen:frame()
-    local w, h = PILL_WIDTH, PILL_HEIGHT
+    -- The apple backend shows live words in the pill, so the pill is wider.
+    local w, h = config.backend == "apple" and 320 or PILL_WIDTH, PILL_HEIGHT
     local x = sf.x + (sf.w - w) / 2
     local y = sf.y + sf.h - h - 40
     local ty = (h - 18) / 2

@@ -177,16 +177,16 @@ Logs are written to `~/Library/Logs/stt-daemon.log`.
 
 #### Apple SpeechTranscriber Backend (Optional)
 
-On macOS 26 or later, the daemon can use the on-device Apple SpeechTranscriber in place of `parakeet-mlx`. The daemon records the audio as before, then runs the `apple-stt` Swift CLI on the WAV file. The Parakeet model does not load with this backend. The backend uses the `en-US` locale and does not detect the language.
+On macOS 26 or later, the daemon can use the on-device Apple SpeechTranscriber in place of `parakeet-mlx`. The daemon records the audio as before and sends it to the `apple-stt` Swift CLI while you speak. The pill shows the last 5 words of the live transcript, and updates approximately once each second. When you stop, Hammerspoon pastes the final text. The Parakeet model does not load with this backend. The backend uses the `en-US` locale and does not detect the language.
 
 1. Build the CLI:
    ```bash
    cd ~/.hammerspoon/stt-daemon
    swiftc -O -target arm64-apple-macos26.0 apple_stt.swift -o apple-stt
    ```
-2. Run the CLI once on a test file. If the `en-US` model is not installed, the CLI downloads it now:
+2. Run the CLI once with no audio. If the `en-US` model is not installed, the CLI downloads it now:
    ```bash
-   say -o /tmp/stt-test.wav --data-format=LEI16@16000 "This is a test." && ./apple-stt /tmp/stt-test.wav
+   ./apple-stt < /dev/null
    ```
 3. Set `backend = "apple"` in the `stt.init` call in `init.lua`.
 4. Reload the Hammerspoon config.

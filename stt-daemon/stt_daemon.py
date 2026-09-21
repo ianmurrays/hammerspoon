@@ -4,13 +4,15 @@
 Records audio on command, transcribes the full recording on stop,
 returns the result. Two backends (--backend):
   parakeet (default): holds the parakeet-mlx model in memory.
-  apple: runs the apple-stt CLI (Apple SpeechTranscriber, macOS 26+)
-         on the recorded WAV. Build it first:
+  apple: streams the audio to the apple-stt CLI (Apple SpeechTranscriber,
+         macOS 26+) while it records, and sends "partial" messages with the
+         transcript so far. Build it first:
          swiftc -O -target arm64-apple-macos26.0 apple_stt.swift -o apple-stt
 
 Protocol:
   Server -> Client: {"type": "ready"}
   Client -> Server: {"cmd": "start"|"stop"|"status"|"quit"}
+  Server -> Client: {"type": "partial", "text": "..."}  (apple backend only)
   Server -> Client: {"type": "transcribing"}
   Server -> Client: {"type": "final", "text": "...", "wav_path": "..."|null}
   Server -> Client: {"type": "error", "message": "...", "wav_path": "..."|null}
@@ -40,14 +42,22 @@ model = None
 sample_rate = None
 backend = "parakeet"
 APPLE_STT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "apple-stt")
+# The recording thread and the apple-stt reader thread both send messages.
+send_lock = threading.Lock()
 
 
 def send_json(conn, obj):
     """Send a JSON message followed by newline."""
     try:
-        conn.sendall((json.dumps(obj) + "\n").encode())
+        with send_lock:
+            conn.sendall((json.dumps(obj) + "\n").encode())
     except (BrokenPipeError, ConnectionResetError, OSError):
         pass
+
+
+def to_int16(audio_array):
+    """Convert float32 samples in [-1, 1] to int16."""
+    return (audio_array * 32767).clip(-32768, 32767).astype(np.int16)
 
 
 def write_temp_wav(audio_array, sr):
@@ -55,7 +65,7 @@ def write_temp_wav(audio_array, sr):
     try:
         fd, path = tempfile.mkstemp(suffix=".wav", prefix="stt-")
         os.close(fd)
-        samples = (audio_array * 32767).clip(-32768, 32767).astype(np.int16)
+        samples = to_int16(audio_array)
         with wave.open(path, "wb") as wf:
             wf.setnchannels(1)
             wf.setsampwidth(2)
@@ -69,17 +79,63 @@ def write_temp_wav(audio_array, sr):
         return None
 
 
-def transcribe_apple(wav_path):
-    """Transcribe a WAV file with the apple-stt CLI. Raises on failure."""
-    if not wav_path:
-        raise RuntimeError("No WAV file to transcribe")
-    # TimeoutExpired propagates to the caller's error path.
-    proc = subprocess.run(
-        [APPLE_STT, wav_path], capture_output=True, text=True, timeout=60
+def start_apple_stt(conn):
+    """Start apple-stt and send its partial results to the client.
+
+    Returns the process and a dict that receives the final text.
+    """
+    proc = subprocess.Popen(
+        [APPLE_STT],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
-    if proc.returncode != 0:
-        raise RuntimeError(proc.stderr.strip() or f"apple-stt exited {proc.returncode}")
-    return proc.stdout.strip()
+    result = {}
+
+    def read_output():
+        for line in proc.stdout:
+            msg = json.loads(line)
+            if msg["type"] == "partial":
+                send_json(conn, msg)
+            else:
+                result["text"] = msg["text"]
+
+    threading.Thread(target=read_output, daemon=True).start()
+    return proc, result
+
+
+def feed_apple_stt(proc, audio_chunks, sent):
+    """Write the chunks after index `sent` to apple-stt. Returns the new index."""
+    end = len(audio_chunks)
+    try:
+        for chunk in audio_chunks[sent:end]:
+            proc.stdin.write(to_int16(chunk).tobytes())
+        proc.stdin.flush()
+    except (BrokenPipeError, OSError):
+        pass  # apple-stt stopped. finish_apple_stt reports its error.
+    return end
+
+
+def finish_apple_stt(proc, result):
+    """Close the audio input and return the final text. Raises on failure."""
+    try:
+        proc.stdin.close()
+    except (BrokenPipeError, OSError):
+        pass
+    try:
+        # The stt.lua stop timeout is 15 s.
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        raise RuntimeError("apple-stt timed out")
+    # stdout closes when the process exits, then the reader thread sets the text.
+    for _ in range(50):
+        if "text" in result:
+            return result["text"]
+        time.sleep(0.01)
+    raise RuntimeError(
+        proc.stderr.read().decode().strip() or f"apple-stt exited {proc.returncode}"
+    )
 
 
 def recording_session(conn, stop_event):
@@ -95,6 +151,9 @@ def recording_session(conn, stop_event):
         print(f"Could not query input device: {e}", file=sys.stderr)
 
     audio_chunks = []
+    apple, apple_result, sent = None, None, 0
+    if backend == "apple":
+        apple, apple_result = start_apple_stt(conn)
     first_logged = False
     last_rms_log = 0.0
     latest_rms = [0.0]
@@ -136,14 +195,22 @@ def recording_session(conn, stop_event):
         ):
             while not stop_event.is_set():
                 send_json(conn, {"type": "audio_level", "rms": latest_rms[0]})
+                if apple:
+                    sent = feed_apple_stt(apple, audio_chunks, sent)
                 time.sleep(0.1)
     except Exception as e:
         print(f"Mic error: {e}", file=sys.stderr)
         send_json(conn, {"type": "error", "message": f"Mic error: {e}"})
+        if apple:
+            apple.kill()
+            apple.wait()
         return
 
     if not audio_chunks:
         send_json(conn, {"type": "final", "text": ""})
+        if apple:
+            apple.kill()
+            apple.wait()
         return
 
     audio = np.concatenate(audio_chunks)
@@ -154,8 +221,9 @@ def recording_session(conn, stop_event):
     send_json(conn, {"type": "transcribing"})
 
     try:
-        if backend == "apple":
-            text = transcribe_apple(wav_path)
+        if apple:
+            feed_apple_stt(apple, audio_chunks, sent)
+            text = finish_apple_stt(apple, apple_result)
         else:
             import mlx.core as mx
             from parakeet_mlx.audio import get_logmel
