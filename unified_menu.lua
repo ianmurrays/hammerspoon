@@ -1,5 +1,6 @@
 -- Unified Menu Module for Hammerspoon
--- Combines hyperduck, scratchpad, and slack_status into a single menubar
+-- Combines hyperduck, scratchpad, slack_status, screen_blur, clipboard_history and
+-- keyboard_lock into a single menubar
 
 local M = {}
 
@@ -68,6 +69,18 @@ local function buildUnifiedMenu()
         end
     end
 
+    -- Separator
+    table.insert(menu, { title = "-" })
+
+    -- Keyboard Lock section
+    table.insert(menu, { title = "Keyboard Lock", disabled = true })
+    local keyboardLockItems = modules.keyboardLock and modules.keyboardLock.getMenuItems()
+    if keyboardLockItems and type(keyboardLockItems) == "table" then
+        for _, item in ipairs(keyboardLockItems) do
+            table.insert(menu, item)
+        end
+    end
+
     return menu
 end
 
@@ -95,6 +108,7 @@ function M.init(cfg)
     modules.slackStatus = cfg.slackStatus
     modules.screenBlur = cfg.screenBlur
     modules.clipboardHistory = cfg.clipboardHistory
+    modules.keyboardLock = cfg.keyboardLock
 
     -- Create menubar
     menubarItem = hs.menubar.new()

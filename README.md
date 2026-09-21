@@ -16,9 +16,10 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | `stt` | Local speech-to-text via parakeet-mlx daemon with optional LLM post-processing, audio tones, media pause/resume, and transcription history viewer | fn+Space (toggle) / fn+Shift (hold) / Ctrl+Alt+H (history) |
 | `clipboard_history` | Clipboard history with search, auto-skips password manager entries, 30-day retention | Ctrl+Alt+V |
 | `mouse_grid` | Keyboard-driven mouse (Mouseless-style): full-screen hint grid for click, right/double click, drag & drop, and scrolling; element hints mode (Shortcat-style, via the Accessibility API); free mode for smooth relative cursor movement | Tap left Cmd (grid) / Double-tap left Cmd (hints) / Tap left Alt (free) |
-| `unified_menu` | Combines Slack Status, Hyperduck, Scratchpad, Screen Blur, and Clipboard History into a single menubar item | — |
+| `unified_menu` | Combines Slack Status, Hyperduck, Scratchpad, Screen Blur, Clipboard History, and Keyboard Lock into a single menubar item | — |
 | `eject_lock` | Locks the screen when the Magic Keyboard's Eject key is double-tapped; holding Eject for 4 seconds runs the "Eject TimeMachine Disk" macOS Shortcut (modifier combos like Cmd+Alt+Eject pass through untouched) | Double-tap Eject / Hold Eject 4s |
 | `whatcable` | Menubar view of USB-C/Thunderbolt port data (link speed, cable capabilities, charging, displays, connected device tree, cable trust warnings) via the [whatcable](https://github.com/darrylmorley/whatcable) CLI; refreshes on USB/power/display changes | — |
+| `keyboard_lock` | Locks the keyboard so you can clean it: a full-screen overlay plus an event tap that swallows keys, modifiers and media keys; a hold of Esc or the mouse button for 3 seconds unlocks | Ctrl+Alt+K |
 
 ## Hotkeys
 
@@ -43,6 +44,7 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | Tap left Alt | Toggle free mouse mode (relative cursor movement, no overlay) |
 | Double-tap Eject | Lock screen |
 | Hold Eject (4s) | Run the "Eject TimeMachine Disk" macOS Shortcut |
+| Ctrl+Alt+K | Lock the keyboard for a clean (hold Esc or the mouse button for 3 seconds, then release, to unlock) |
 
 > **Note:** Home = Fn+Left and End = Fn+Right on Mac keyboards.
 
@@ -108,6 +110,14 @@ Moves the real cursor with the keyboard — no grid overlay, just a hint toast a
 | Cmd+Space | Drag toggle — press to grab, move, press Space again to drop |
 | The 4 keys right of N | Scroll left/up/down/right (Shift = faster) — matched by physical position, so `m , . /` on US, `m , . -` on Spanish ISO; the toast shows the keys for your layout |
 | Esc | Exit free mode (releases a held drag) |
+
+### Keyboard Lock (Ctrl+Alt+K)
+
+Ctrl+Alt+K covers every screen with a dark overlay and swallows all keyboard input. You can then wipe the keyboard. No key reaches an app and no shortcut runs. The hotkey only locks; it does not unlock. To unlock, hold Esc or the mouse button for 3 seconds and release. The lock also releases itself after 5 minutes.
+
+The mouse and the trackpad stay live on purpose, but a short click does nothing. The mouse button needs the same 3-second hold as Esc, because a palm on the trackpad is easy during a clean.
+
+macOS handles 3 inputs below the event tap, and the lock cannot block them: Caps Lock, the power button, and Touch ID. Trackpad gestures such as Mission Control are not keyboard events, and the lock does not block them either. A double-tap of the fn key can still start dictation; this is not verified.
 
 ## File Structure
 

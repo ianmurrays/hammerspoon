@@ -13,6 +13,7 @@ local mouseGrid = require("mouse_grid")
 local unifiedMenu = require("unified_menu")
 local ejectLock = require("eject_lock")
 local whatcable = require("whatcable")
+local keyboardLock = require("keyboard_lock")
 
 -- Read Slack token from macOS Keychain
 -- One-time setup: security add-generic-password -a "$USER" -s "slack-status-token" -w "xoxp-your-token-here"
@@ -148,14 +149,19 @@ ejectLock.init({})
 -- Initialize WhatCable menubar (USB-C/Thunderbolt cable data)
 whatcable.init({})
 
+-- Initialize Keyboard Lock (Ctrl+Alt+K locks the keyboard for a clean)
+keyboardLock.init({})
+
 -- -- Initialize Mouse Grid (tap left Cmd to toggle keyboard-driven mouse)
 -- mouseGrid.init({})
 
--- Initialize Unified Menu (combines Slack Status, Hyperduck, Scratchpad, Screen Blur, Clipboard History)
+-- Initialize Unified Menu (combines Slack Status, Hyperduck, Scratchpad, Screen Blur, Clipboard History,
+-- Keyboard Lock)
 unifiedMenu.init({
 	slackStatus = slackStatus,
 	hyperduck = hyperduck,
 	scratchpad = scratchpad,
 	screenBlur = screenBlur,
 	clipboardHistory = clipboardHistory,
+	keyboardLock = keyboardLock,
 })

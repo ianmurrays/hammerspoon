@@ -35,6 +35,7 @@ return M
 | `unified_menu` | Combines slack_status, hyperduck, scratchpad, screen_blur, and clipboard_history into a single menubar item | — |
 | `eject_lock` | Eject key gestures via a `systemDefined` eventtap + `systemKey()`: double-tap locks the screen, 4s hold runs the "Eject TimeMachine Disk" Shortcut (`/usr/bin/shortcuts run`); modifier combos pass through | Double-tap Eject / Hold Eject 4s |
 | `whatcable` | Menubar view of USB-C/Thunderbolt port data via the `whatcable` CLI (`hs.task` + `--json`); refreshes on USB/battery/screen watcher events (2s debounce) plus 60s fallback timer | — |
+| `keyboard_lock` | Keyboard clean mode: full-screen `hs.canvas` overlay plus an eventtap that swallows keyDown/keyUp/flagsChanged/systemDefined; tap is created at lock time so head-insertion puts it ahead of the `stt`/`eject_lock` taps; unlock by holding Esc or the mouse button 3s and releasing (mouse is deliberately not blocked; a short click does nothing), or the 5-minute cap | Ctrl+Alt+K |
 
 **Unified menu integration:** Modules that appear in the unified menubar expose `getMenuItems()` (returns menu table) and optionally `setUpdateCallback(fn)` so the unified menu can refresh when state changes.
 
