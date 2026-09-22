@@ -18,7 +18,7 @@ func emit(_ type: String, _ text: String) {
 
 let locale = Locale(identifier: CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "en-US")
 // ponytail: fixed input format. SpeechAnalyzer.bestAvailableAudioFormat gives this
-// format for en-US. If a locale needs a different format, add an AVAudioConverter.
+// format for en-US and es-CL. If a locale needs a different format, add an AVAudioConverter.
 let format = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: false)!
 
 do {

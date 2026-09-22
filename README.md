@@ -36,7 +36,7 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | Ctrl+Alt+G | Toggle GIF finder |
 | Ctrl+Alt+B | Toggle screen blur overlay (also dismisses on click or any keypress) |
 | fn+Space | Toggle speech-to-text recording (press to start, press again to stop and paste) |
-| fn+Shift | Hold-to-talk speech-to-text (hold both to record, release to stop and paste) |
+| fn+Shift | Hold-to-talk speech-to-text (hold both to record, release to stop and paste). With the Apple backend and 2 or more `locales`, a tap (less than 250 ms) switches to the next language |
 | Ctrl+Alt+H | Toggle STT transcription history viewer |
 | Ctrl+Alt+V | Toggle clipboard history viewer |
 | Tap left Cmd | Toggle mouse grid overlay (quick press+release of left Cmd alone) |
@@ -177,7 +177,7 @@ Logs are written to `~/Library/Logs/stt-daemon.log`.
 
 #### Apple SpeechTranscriber Backend (Optional)
 
-On macOS 26 or later, the daemon can use the on-device Apple SpeechTranscriber in place of `parakeet-mlx`. The daemon records the audio as before and sends it to the `apple-stt` Swift CLI while you speak. The pill shows the last 5 words of the live transcript, and updates approximately once each second. When you stop, Hammerspoon pastes the final text. The Parakeet model does not load with this backend. The backend uses the `en-US` locale and does not detect the language.
+On macOS 26 or later, the daemon can use the on-device Apple SpeechTranscriber in place of `parakeet-mlx`. The daemon records the audio as before and sends it to the `apple-stt` Swift CLI while you speak. The pill shows the last 5 words of the live transcript, and updates approximately once each second. When you stop, Hammerspoon pastes the final text. The Parakeet model does not load with this backend. The backend does not detect the language. It uses the first locale in the `locales` option (default `en-US`).
 
 1. Build the CLI:
    ```bash
@@ -193,9 +193,20 @@ On macOS 26 or later, the daemon can use the on-device Apple SpeechTranscriber i
 
 To use `parakeet-mlx` again, set `backend = "parakeet"` (the default) and reload the config.
 
+To dictate in more than 1 language:
+
+1. Download the model for each locale, for example Chilean Spanish:
+   ```bash
+   ./apple-stt es-CL < /dev/null
+   ```
+2. Set `locales = { "en-US", "es-CL" }` in the `stt.init` call in `init.lua`.
+3. Reload the Hammerspoon config.
+
+A tap of fn+Shift (less than 250 ms) switches to the next locale and shows it in an alert. The locale stays until the next tap, and fn+Space uses it too. When the locale is not the first one, the pill shows it after "Recording…".
+
 #### LLM Post-Processing (Optional)
 
-When a Mistral API key is present in the keychain, transcribed text is sent through the Mistral API to remove filler words, fix punctuation/capitalization, and apply light grammar corrections. The pill overlay shows a purple "Polishing..." spinner during this step. If the API call fails or times out (10s), the raw transcription is pasted instead.
+When a Mistral API key is present in the keychain, transcribed text is sent through the Mistral API to remove filler words, fix punctuation/capitalization, and apply light grammar corrections. The pill overlay shows a purple "Polishing..." spinner during this step. If the API call fails or times out (10s), the raw transcription is pasted instead. With the Apple backend, the request also gives the locale of the recording (for example `es-CL`), so that Mistral does not guess the language.
 
 Configuration options in `init.lua`:
 

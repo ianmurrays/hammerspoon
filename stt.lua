@@ -8,6 +8,8 @@
 --   host              = string   (default: "127.0.0.1")
 --   port              = number   (default: 9876)
 --   backend           = "parakeet" or "apple" (default: "parakeet"; "apple" needs macOS 26+)
+--   locales           = table    (default: {"en-US"}; apple backend only. With 2 or more,
+--                                  a tap of fn+Shift switches to the next locale)
 --   paste_method      = "clipboard" or "keystrokes"
 --   idle_timeout      = number   (seconds, default: 300)
 --   llm_api_key       = string   (default: nil, disabled)
@@ -32,11 +34,12 @@ local config = {
     daemon_cmd = "/opt/homebrew/bin/uv",
     daemon_dir = os.getenv("HOME") .. "/.hammerspoon/stt-daemon",
     backend = "parakeet",
+    locales = {"en-US"},
     -- LLM post-processing (nil api_key = disabled)
     llm_api_key = nil,
     llm_api_url = "https://api.mistral.ai/v1/chat/completions",
     llm_model = "mistral-small-latest",
-    llm_system_prompt = "You are a transcript cleaner. Your ONLY job is to clean up speech transcription artifacts. You must NEVER change the meaning, rephrase sentences, or substitute words with different ones. Only do the following: remove filler words (um, uh, like, you know), fix punctuation and capitalization, and apply light grammar fixes. Never use em-dashes, en-dashes, or any similar dash variants; use commas, semicolons, colons, or separate sentences instead. If unsure whether a change alters meaning, leave the original wording. Return ONLY the cleaned text, nothing else.",
+    llm_system_prompt = "You are a transcript cleaner. Your ONLY job is to clean up speech transcription artifacts. You must NEVER change the meaning, rephrase sentences, or substitute words with different ones. Only do the following: remove filler words (um, uh, like, you know), fix punctuation and capitalization, and apply light grammar fixes. Keep the text in its original language; never translate it. Never use em-dashes, en-dashes, or any similar dash variants; use commas, semicolons, colons, or separate sentences instead. If unsure whether a change alters meaning, leave the original wording. Return ONLY the cleaned text, nothing else.",
     llm_timeout = 10,
     -- Tones & media control
     play_tones = true,
@@ -61,6 +64,10 @@ local sock = nil
 local canvas = nil
 local eventTap = nil
 local fnShiftHeld = false
+local fnShiftDownAt = 0        -- event timestamp (ns) of the last fn+shift press
+local fnShiftStarted = false   -- the last fn+shift press started a session
+local localeIndex = 1          -- index into config.locales
+local sessionLocale = nil      -- locale sent with the last "start" command
 local animTimer = nil
 local connectTimer = nil
 local stopTimeout = nil
@@ -167,7 +174,9 @@ sendCommand = function(cmd)
     local connected = sock and sock:connected()
     print("stt: sendCommand('" .. cmd .. "') connected=" .. tostring(connected))
     if connected then
-        sock:write(hs.json.encode({cmd = cmd}) .. "\n")
+        local locale = config.locales[localeIndex]
+        if cmd == "start" then sessionLocale = locale end
+        sock:write(hs.json.encode({cmd = cmd, locale = locale}) .. "\n")
     end
 
     if cmd == "stop" then
@@ -357,10 +366,16 @@ end
 -- ── LLM post-processing ─────────────────────────────────────────
 
 postProcessText = function(rawText, callback)
+    local prompt = config.llm_system_prompt
+    -- The apple backend knows the language. Tell the LLM, so that it does not guess.
+    -- Parakeet detects the language itself, so the locale does not apply to it.
+    if config.backend == "apple" and sessionLocale then
+        prompt = prompt .. " The transcript language is " .. sessionLocale .. "."
+    end
     local payload = hs.json.encode({
         model = config.llm_model,
         messages = {
-            {role = "system", content = config.llm_system_prompt},
+            {role = "system", content = prompt},
             {role = "user", content = rawText},
         },
         temperature = 0.1,
@@ -624,7 +639,9 @@ updatePill = function(pillState)
 
     elseif pillState == "recording" then
         canvas[2].text = hs.styledtext.new("", {})
-        canvas[3].text = hs.styledtext.new("Recording…", {
+        -- Show the locale when it is not the first one, because the choice stays.
+        local label = localeIndex > 1 and "Recording… " .. config.locales[localeIndex] or "Recording…"
+        canvas[3].text = hs.styledtext.new(label, {
             font = {name = ".AppleSystemUIFont", size = 14},
             color = {white = 1},
         })
@@ -786,8 +803,16 @@ function M.init(cfg)
     end
 
     -- fn+space: toggle dictation
-    -- fn+shift: hold-to-talk (hold both to record, release either to stop)
+    -- fn+shift: hold-to-talk (hold both to record, release either to stop).
+    --           With the apple backend and 2 or more locales, a tap (release in
+    --           less than 250 ms) switches to the next locale and discards the recording.
     fnShiftHeld = false
+    -- Event time in ns since boot. A timestamp of 0 falls back to the current time,
+    -- so that a hold is never measured as a tap.
+    local function eventTime(e)
+        local t = e:timestamp()
+        return t ~= 0 and t or hs.timer.absoluteTime()
+    end
     eventTap = hs.eventtap.new(
         {hs.eventtap.event.types.keyDown, hs.eventtap.event.types.flagsChanged},
         function(event)
@@ -810,12 +835,30 @@ function M.init(cfg)
                                  and not flags.cmd and not flags.alt and not flags.ctrl
                 if bothHeld and not fnShiftHeld then
                     fnShiftHeld = true
+                    -- The event timestamp is not affected by the time that
+                    -- connectAndStart() spends in the synchronous media check.
+                    fnShiftDownAt = eventTime(event)
+                    fnShiftStarted = state == "idle"
                     print("stt: fn+shift held, state=" .. state)
-                    if state == "idle" then connectAndStart() end
+                    if fnShiftStarted then connectAndStart() end
                 elseif not bothHeld and fnShiftHeld then
                     fnShiftHeld = false
                     print("stt: fn+shift released, state=" .. state)
-                    if state == "recording" then
+                    local isTap = config.backend == "apple" and #config.locales > 1
+                                  and (eventTime(event) - fnShiftDownAt) < 250e6
+                    if isTap then
+                        localeIndex = localeIndex % #config.locales + 1
+                        print("stt: tap, locale=" .. config.locales[localeIndex])
+                        hs.alert.show("STT: " .. config.locales[localeIndex], 1)
+                        -- Discard the session that this press started. The daemon
+                        -- discards the recording when the socket disconnects.
+                        if fnShiftStarted and state ~= "idle" then
+                            resumeMedia()
+                            hideOverlay()
+                            cleanup()
+                            resetIdleTimer()
+                        end
+                    elseif state == "recording" then
                         sendCommand("stop")
                     elseif state == "starting" then
                         -- Released before the daemon was ready: abort, or the eventual

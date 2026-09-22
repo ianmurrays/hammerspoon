@@ -12,6 +12,9 @@ returns the result. Two backends (--backend):
 Protocol:
   Server -> Client: {"type": "ready"}
   Client -> Server: {"cmd": "start"|"stop"|"status"|"quit"}
+                    "start" can include "locale" (apple backend, default "en-US").
+                    If the client disconnects while it records, the daemon
+                    discards the recording.
   Server -> Client: {"type": "partial", "text": "..."}  (apple backend only)
   Server -> Client: {"type": "transcribing"}
   Server -> Client: {"type": "final", "text": "...", "wav_path": "..."|null}
@@ -79,13 +82,13 @@ def write_temp_wav(audio_array, sr):
         return None
 
 
-def start_apple_stt(conn):
+def start_apple_stt(conn, locale):
     """Start apple-stt and send its partial results to the client.
 
     Returns the process and a dict that receives the final text.
     """
     proc = subprocess.Popen(
-        [APPLE_STT],
+        [APPLE_STT, locale],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -138,7 +141,7 @@ def finish_apple_stt(proc, result):
     )
 
 
-def recording_session(conn, stop_event):
+def recording_session(conn, stop_event, cancel_event, locale):
     """Record audio until stop, then transcribe and send result."""
     try:
         dev = sd.query_devices(kind="input")
@@ -153,7 +156,7 @@ def recording_session(conn, stop_event):
     audio_chunks = []
     apple, apple_result, sent = None, None, 0
     if backend == "apple":
-        apple, apple_result = start_apple_stt(conn)
+        apple, apple_result = start_apple_stt(conn, locale)
     first_logged = False
     last_rms_log = 0.0
     latest_rms = [0.0]
@@ -206,6 +209,13 @@ def recording_session(conn, stop_event):
             apple.wait()
         return
 
+    if cancel_event.is_set():
+        print("Client disconnected, recording discarded", file=sys.stderr)
+        if apple:
+            apple.kill()
+            apple.wait()
+        return
+
     if not audio_chunks:
         send_json(conn, {"type": "final", "text": ""})
         if apple:
@@ -246,6 +256,7 @@ def handle_client(conn, addr):
     send_json(conn, {"type": "ready"})
 
     stop_event = threading.Event()
+    cancel_event = threading.Event()
     recording_thread = None
     buffer = ""
 
@@ -283,7 +294,7 @@ def handle_client(conn, addr):
                     stop_event.clear()
                     recording_thread = threading.Thread(
                         target=recording_session,
-                        args=(conn, stop_event),
+                        args=(conn, stop_event, cancel_event, msg.get("locale", "en-US")),
                         daemon=True,
                     )
                     recording_thread.start()
@@ -317,6 +328,8 @@ def handle_client(conn, addr):
     except (ConnectionResetError, BrokenPipeError, OSError):
         pass
     finally:
+        # Set cancel before stop, so that the recording thread sees it when it stops.
+        cancel_event.set()
         stop_event.set()
         if recording_thread and recording_thread.is_alive():
             recording_thread.join(timeout=30)
