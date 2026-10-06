@@ -1,100 +1,161 @@
     const searchBox = document.getElementById('search-box');
     const status = document.getElementById('status');
     const results = document.getElementById('results');
-    const COLS = 3;
-    let selectedIndex = -1;
+    const COLS = 4;
+    const TABS = ['search', 'favorites', 'recents'];
     let currentTab = 'search';
     let favoritesSet = new Set();
+    let gifs = [];      // list from Lua for the current tab
+    let shown = [];     // gifs after the local filter (favorites/recents)
+    let columns = [];   // columns[c] = indices into shown, top to bottom
+    let tileEls = [];   // tileEls[i] = element for shown[i]
+    let selected = -1;
+    let searchTimer = null;
 
-    function getItems() {
-      return results.querySelectorAll('.gif-item');
+    function post(msg) {
+      window.webkit.messageHandlers.gifFinder.postMessage(msg);
     }
 
-    function updateSelection() {
-      getItems().forEach((el, i) => {
-        el.classList.toggle('selected', i === selectedIndex);
+    function setStatus(text, isError) {
+      status.className = 'panel-empty' + (isError ? ' error' : '');
+      status.textContent = text;
+    }
+
+    function emptyText() {
+      if (currentTab === 'search') return searchBox.value.trim() ? 'No results found' : 'Type to search Klipy';
+      if (gifs.length && searchBox.value.trim()) return 'No matches';
+      return currentTab === 'favorites' ? 'No favorites yet. Press ⌘D on a GIF to add it.' : 'No recent GIFs';
+    }
+
+    // Masonry: each tile goes to the currently shortest column. Columns have equal width,
+    // so column height is tracked as the sum of height/width ratios.
+    function render(keepSelection) {
+      const prev = selected;
+      results.replaceChildren();
+      columns = Array.from({ length: COLS }, () => []);
+      tileEls = [];
+      const colRatio = new Array(COLS).fill(0);
+      const colEls = columns.map(() => {
+        const col = document.createElement('div');
+        col.className = 'gif-col';
+        return col;
       });
-      const items = getItems();
-      if (selectedIndex >= 0 && items[selectedIndex]) {
-        items[selectedIndex].scrollIntoView({ block: 'nearest' });
-      }
-    }
 
-    function clearGrid() {
-      while (results.firstChild) results.removeChild(results.firstChild);
-      selectedIndex = -1;
-    }
-
-    function clearSelection() {
-      selectedIndex = -1;
-      updateSelection();
-    }
-
-    function selectGif(url, thumb) {
-      window.webkit.messageHandlers.gifFinder.postMessage({
-        action: 'select',
-        url: url,
-        thumb: thumb
-      });
-    }
-
-    function renderGrid(gifs) {
-      clearGrid();
-
-      if (gifs.length === 0) {
-        status.className = '';
-        if (currentTab === 'search') {
-          status.textContent = 'No results found';
-        } else if (currentTab === 'favorites') {
-          status.textContent = 'No favorites yet \u2014 star GIFs from search results';
-        } else {
-          status.textContent = 'No recent GIFs';
-        }
+      if (shown.length === 0) {
+        selected = -1;
+        setStatus(emptyText());
         return;
       }
+      setStatus('');
 
-      status.textContent = '';
+      shown.forEach((gif, i) => {
+        const ratio = gif.width > 0 && gif.height > 0 ? gif.height / gif.width : 1;
+        let c = 0;
+        for (let k = 1; k < COLS; k++) if (colRatio[k] < colRatio[c]) c = k;
+        colRatio[c] += ratio;
+        columns[c].push(i);
 
-      gifs.forEach((gif) => {
         const item = document.createElement('div');
         item.className = 'gif-item';
-        item.dataset.url = gif.url;
-        item.dataset.thumb = gif.thumb;
-
-        const star = document.createElement('button');
-        const isFav = favoritesSet.has(gif.url);
-        star.className = 'star-btn' + (isFav ? ' favorited' : '');
-        star.textContent = isFav ? '\u2605' : '\u2606';
-        star.addEventListener('click', (e) => {
-          e.stopPropagation();
-          window.webkit.messageHandlers.gifFinder.postMessage({
-            action: 'toggleFavorite',
-            thumb: gif.thumb,
-            url: gif.url
-          });
-        });
-        item.appendChild(star);
-
-        const htmlBtn = document.createElement('button');
-        htmlBtn.className = 'copy-html-btn';
-        htmlBtn.textContent = '<>';
-        htmlBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          window.webkit.messageHandlers.gifFinder.postMessage({
-            action: 'selectHtml',
-            thumb: gif.thumb,
-            url: gif.url
-          });
-        });
-        item.appendChild(htmlBtn);
-
+        item.style.aspectRatio = gif.width > 0 && gif.height > 0 ? gif.width + ' / ' + gif.height : '1 / 1';
         const img = document.createElement('img');
         img.src = gif.thumb;
         img.loading = 'lazy';
         item.appendChild(img);
-        item.addEventListener('click', () => selectGif(gif.url, gif.thumb));
-        results.appendChild(item);
+        if (favoritesSet.has(gif.url)) {
+          const badge = document.createElement('div');
+          badge.className = 'fav-badge';
+          badge.textContent = '★';
+          item.appendChild(badge);
+        }
+        const overlay = document.createElement('div');
+        overlay.className = 'copy-overlay';
+        const key = document.createElement('span');
+        key.className = 'key';
+        key.textContent = '↵';
+        overlay.append(key, 'Copy URL');
+        item.appendChild(overlay);
+        item.addEventListener('click', (e) => {
+          select(i);
+          copy(e.metaKey ? 'selectHtml' : 'select');
+        });
+        item.addEventListener('mouseenter', () => select(i));
+        colEls[c].appendChild(item);
+        tileEls.push(item);
       });
+      colEls.forEach(col => results.appendChild(col));
+      select(keepSelection ? Math.min(Math.max(prev, 0), shown.length - 1) : 0);
+    }
+
+    function applyFilter(keepSelection) {
+      const needle = searchBox.value.trim().toLowerCase();
+      shown = currentTab === 'search' || !needle
+        ? gifs
+        : gifs.filter(g => (g.title || '').toLowerCase().includes(needle));
+      render(keepSelection);
+    }
+
+    function select(i) {
+      if (tileEls[selected]) tileEls[selected].classList.remove('selected');
+      selected = i;
+      const el = tileEls[i];
+      if (el) {
+        el.classList.add('selected');
+        el.scrollIntoView({ block: 'nearest' });
+      }
+    }
+
+    function copy(action) {
+      const gif = shown[selected];
+      if (gif) post({ action: action, gif: gif });
+    }
+
+    function locate(i) {
+      for (let c = 0; c < COLS; c++) {
+        const r = columns[c].indexOf(i);
+        if (r >= 0) return { c, r };
+      }
+      return null;
+    }
+
+    function centreY(i) {
+      const el = tileEls[i];
+      return el.offsetTop + el.offsetHeight / 2;
+    }
+
+    // Up/down stay in the column; left/right jump to the tile in the next non-empty
+    // column whose vertical centre is closest.
+    function move(key) {
+      const pos = locate(selected);
+      if (!pos) return;
+      const col = columns[pos.c];
+      if (key === 'ArrowUp' && pos.r > 0) return select(col[pos.r - 1]);
+      if (key === 'ArrowDown' && pos.r < col.length - 1) return select(col[pos.r + 1]);
+      if (key !== 'ArrowLeft' && key !== 'ArrowRight') return;
+      const step = key === 'ArrowLeft' ? -1 : 1;
+      for (let c = pos.c + step; c >= 0 && c < COLS; c += step) {
+        if (columns[c].length === 0) continue;
+        const y = centreY(selected);
+        let best = columns[c][0];
+        for (const j of columns[c]) {
+          if (Math.abs(centreY(j) - y) < Math.abs(centreY(best) - y)) best = j;
+        }
+        return select(best);
+      }
+    }
+
+    function runSearch() {
+      clearTimeout(searchTimer);
+      const query = searchBox.value.trim();
+      if (!query) {
+        gifs = [];
+        applyFilter(false);
+        return;
+      }
+      searchTimer = setTimeout(() => {
+        setStatus('Searching…');
+        post({ action: 'search', query: query });
+      }, 300);
     }
 
     function switchTab(tabName) {
@@ -102,154 +163,67 @@
       document.querySelectorAll('#tabs button').forEach(b => {
         b.classList.toggle('active', b.dataset.tab === tabName);
       });
-
-      clearGrid();
-
-      if (tabName === 'search') {
-        searchBox.style.display = '';
-        status.className = '';
-        status.textContent = 'Type a search term and press Enter';
-        searchBox.focus();
-      } else {
-        searchBox.style.display = 'none';
-        status.className = '';
-        status.textContent = '';
-      }
-
-      window.webkit.messageHandlers.gifFinder.postMessage({
-        action: 'switchTab',
-        tab: tabName
-      });
+      clearTimeout(searchTimer);
+      gifs = [];
+      shown = [];
+      results.replaceChildren();
+      selected = -1;
+      searchBox.placeholder = tabName === 'search' ? 'Search GIFs' : 'Filter ' + tabName;
+      searchBox.focus();
+      post({ action: 'switchTab', tab: tabName });
+      if (tabName === 'search') runSearch();
     }
 
     document.querySelectorAll('#tabs button').forEach(btn => {
+      btn.addEventListener('mousedown', (e) => e.preventDefault()); // keep focus in the input
       btn.addEventListener('click', () => switchTab(btn.dataset.tab));
     });
 
+    searchBox.addEventListener('input', () => {
+      if (currentTab === 'search') runSearch();
+      else applyFilter(false);
+    });
+
     document.addEventListener('keydown', (e) => {
-      const items = getItems();
-      const inGrid = selectedIndex >= 0;
-
-      if (inGrid) {
-        if (e.key === 'ArrowDown') {
-          e.preventDefault();
-          const next = selectedIndex + COLS;
-          if (next < items.length) selectedIndex = next;
-          updateSelection();
-        } else if (e.key === 'ArrowUp') {
-          e.preventDefault();
-          const next = selectedIndex - COLS;
-          if (next < 0) {
-            clearSelection();
-            if (currentTab === 'search') {
-              searchBox.focus();
-            }
-          } else {
-            selectedIndex = next;
-            updateSelection();
-          }
-        } else if (e.key === 'ArrowLeft') {
-          e.preventDefault();
-          if (selectedIndex > 0) {
-            selectedIndex--;
-            updateSelection();
-          }
-        } else if (e.key === 'ArrowRight') {
-          e.preventDefault();
-          if (selectedIndex < items.length - 1) {
-            selectedIndex++;
-            updateSelection();
-          }
-        } else if (e.key === 'Enter') {
-          e.preventDefault();
-          const item = items[selectedIndex];
-          const url = item?.dataset.url;
-          const thumb = item?.dataset.thumb;
-          if (url) selectGif(url, thumb);
-        } else if (e.key === 'Escape') {
-          e.preventDefault();
-          clearSelection();
-          if (currentTab === 'search') {
-            searchBox.focus();
-          }
-        } else if (e.key.length === 1 && currentTab === 'search') {
-          clearSelection();
-          searchBox.focus();
-        }
-        return;
-      }
-
-      // Search box mode
-      if (document.activeElement === searchBox) {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          const query = searchBox.value.trim();
-          if (query) {
-            status.className = '';
-            status.textContent = 'Searching...';
-            clearGrid();
-            window.webkit.messageHandlers.gifFinder.postMessage({
-              action: 'search',
-              query: query
-            });
-          }
-        } else if (e.key === 'Escape') {
-          e.preventDefault();
-          window.webkit.messageHandlers.gifFinder.postMessage({ action: 'close' });
-        } else if ((e.key === 'ArrowDown' || e.key === 'Tab') && items.length > 0) {
-          e.preventDefault();
-          selectedIndex = 0;
-          updateSelection();
-          searchBox.blur();
-        }
-      }
-
-      // Non-search tab, not in grid
-      if (currentTab !== 'search' && !inGrid) {
-        if ((e.key === 'ArrowDown' || e.key === 'Tab') && items.length > 0) {
-          e.preventDefault();
-          selectedIndex = 0;
-          updateSelection();
-        } else if (e.key === 'Escape') {
-          e.preventDefault();
-          window.webkit.messageHandlers.gifFinder.postMessage({ action: 'close' });
-        }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        post({ action: 'close' });
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        const i = TABS.indexOf(currentTab);
+        switchTab(TABS[(i + (e.shiftKey ? TABS.length - 1 : 1)) % TABS.length]);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        copy(e.metaKey ? 'selectHtml' : 'select');
+      } else if (e.metaKey && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        const gif = shown[selected];
+        if (gif) post({ action: 'toggleFavorite', gif: gif });
+      } else if (e.key.startsWith('Arrow') && !e.metaKey && selected >= 0) {
+        e.preventDefault();
+        move(e.key);
       }
     });
 
-    window.showResults = function(jsonStr) {
-      const gifs = JSON.parse(jsonStr);
-      renderGrid(gifs);
+    window.showResults = function(list) {
+      gifs = Array.isArray(list) ? list : [];
+      applyFilter(currentTab === 'favorites');
     };
 
     window.showError = function(message) {
-      status.className = 'error';
-      status.textContent = message;
-      clearGrid();
+      gifs = [];
+      shown = [];
+      results.replaceChildren();
+      selected = -1;
+      setStatus(message, true);
     };
 
-    window.setFavorites = function(jsonStr) {
-      const urls = JSON.parse(jsonStr);
+    window.setFavorites = function(urls) {
       favoritesSet = new Set(urls);
-      document.querySelectorAll('.gif-item').forEach(item => {
-        const star = item.querySelector('.star-btn');
-        if (star) {
-          const isFav = favoritesSet.has(item.dataset.url);
-          star.className = 'star-btn' + (isFav ? ' favorited' : '');
-          star.textContent = isFav ? '\u2605' : '\u2606';
-        }
-      });
+      if (currentTab !== 'favorites') render(true); // favorites tab gets a fresh list from Lua
     };
 
     window.resetUI = function() {
       searchBox.value = '';
-      searchBox.style.display = '';
-      clearGrid();
-      currentTab = 'search';
-      document.querySelectorAll('#tabs button').forEach(b => {
-        b.classList.toggle('active', b.dataset.tab === 'search');
-      });
-      status.className = '';
-      status.textContent = 'Type a search term and press Enter';
-      searchBox.focus();
+      switchTab('search');
     };

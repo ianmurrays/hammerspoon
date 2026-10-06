@@ -40,7 +40,7 @@ return M
 
 **Unified menu integration:** Modules that appear in the unified menubar expose `getMenuItems()` (returns menu table) and optionally `setUpdateCallback(fn)` so the unified menu can refresh when state changes.
 
-**Webview modules** (`scratchpad`, `gif_finder`, `slack_status` custom status form, `clipboard_history`) use `hs.webview` with embedded HTML/JS. Communication between Lua and JS uses `hs.webview.usercontent` message handlers (`window.webkit.messageHandlers.<name>.postMessage(...)`).
+**Webview modules** (`scratchpad`, `gif_finder`, `slack_status` custom status form, `clipboard_history`, `stt` history) use `hs.webview` with embedded HTML/JS, created through `panel.lua` (borderless transparent window, 30px shadow margin, `panel.show` remembers the frontmost app, `panel.hide(wv, restoreFocus)`, `focusChange` blur callback). `html_loader` prepends `html/panel.css` (shared `.panel`, `.panel-search`, `.panel-footer`, `.kbd` classes) to each module's CSS. `toast.lua` (`toast.show{icon, title, detail, tint, seconds, segments, active}`) replaces `hs.alert` in modules; `init.lua` keeps `hs.alert` for the startup keychain error. Communication between Lua and JS uses `hs.webview.usercontent` message handlers (`window.webkit.messageHandlers.<name>.postMessage(...)`).
 
 ## Secrets
 

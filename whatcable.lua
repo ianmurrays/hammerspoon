@@ -3,6 +3,7 @@
 -- (https://github.com/darrylmorley/whatcable)
 
 local M = {}
+local toast = require("toast")
 
 local WHATCABLE = "/opt/homebrew/bin/whatcable"
 
@@ -190,7 +191,7 @@ function M.init(cfg)
     config.refreshInterval = cfg.refreshInterval or 60
 
     if not hs.fs.attributes(WHATCABLE) then
-        hs.alert.show("whatcable CLI not found at " .. WHATCABLE)
+        toast.show({ icon = "!", tint = "red", title = "whatcable CLI not found", detail = WHATCABLE })
         return M
     end
 

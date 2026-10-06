@@ -3,6 +3,7 @@
 -- Eject emits an NSSystemDefined media-key event, not a regular keycode,
 -- so it's caught via a systemDefined eventtap + systemKey().
 local M = {}
+local toast = require("toast")
 
 -- ponytail: no hs.fs.attributes() check on the CLI — /usr/bin/shortcuts ships with
 -- macOS, and a whatcable-style early return would take the lock-screen half down
@@ -25,11 +26,11 @@ end
 local function runShortcut()
   holdTimer = nil
   lastTap = 0 -- a tap right after a hold must not count as half of a double-tap
-  hs.alert.show("Ejecting Time Machine disk…")
+  toast.show({ icon = "⏏", title = "Ejecting Time Machine disk…" })
   -- ponytail: no single-flight guard — a second run needs another deliberate 4s hold.
   local task = hs.task.new(SHORTCUTS, function(exitCode, _, stdErr)
     if exitCode ~= 0 then
-      hs.alert.show("Eject shortcut failed (exit " .. exitCode .. ")")
+      toast.show({ icon = "!", tint = "red", title = "Eject shortcut failed", detail = "exit " .. exitCode })
       print("eject_lock: shortcuts run failed: " .. (stdErr or ""))
     end
   end, { "run", SHORTCUT_NAME })

@@ -9,6 +9,7 @@
 
 local M = {}
 local htmlLoader = require("html_loader")
+local panel = require("panel")
 
 -- Private state
 local webview = nil
@@ -233,12 +234,36 @@ end
 local EDITOR_NOT_READY = "__SCRATCHPAD_EDITOR_NOT_READY__"
 local GET_CONTENT_JS = "window.getEditorValue ? window.getEditorValue() : '" .. EDITOR_NOT_READY .. "'"
 
-local function hideWebview()
+local WIDTH, HEIGHT = 640, 440
+
+-- Save, then tell the page so its status line reads "Saved"
+local function saveAndReport(content)
+    if saveFile(content) and webview then
+        webview:evaluateJavaScript("window.setStatus && setStatus('saved')")
+    end
+end
+
+-- restoreFocus: re-activate the previous app (Escape, hotkey); a blur passes false
+local function hideWebview(restoreFocus)
     if webview and isVisible then
-        webview:hide()
         isVisible = false
+        panel.hide(webview, restoreFocus)
         print("Scratchpad hidden")
     end
+end
+
+-- Read the editor, save, then hide
+local function saveAndHide(restoreFocus)
+    if isTransitioning or not (webview and isVisible) then return end
+    isTransitioning = true
+    webview:evaluateJavaScript(
+        GET_CONTENT_JS,
+        function(result, error)
+            if result and result ~= EDITOR_NOT_READY then saveAndReport(result) end
+            hideWebview(restoreFocus)
+            isTransitioning = false
+        end
+    )
 end
 
 local function showWebview()
@@ -247,53 +272,16 @@ local function showWebview()
         local usercontent = hs.webview.usercontent.new("scratchpad")
             :setCallback(function(msg)
                 if type(msg.body) == "table" then
-                    saveFile(msg.body.content)
+                    saveAndReport(msg.body.content)
                     if msg.body.action == "save_and_close" then
-                        hideWebview()
+                        hideWebview(true)
                     end
                 end
             end)
 
-        -- Get screen dimensions for centering (use screen where mouse cursor is)
-        local screen = hs.mouse.getCurrentScreen():frame()
-        local width = 600
-        local height = 400
-        local rect = {
-            x = (screen.w - width) / 2,
-            y = (screen.h - height) / 2,
-            w = width,
-            h = height
-        }
-
-        webview = hs.webview.new(rect, { developerExtrasEnabled = false }, usercontent)
-            :allowTextEntry(true)
-            :windowStyle({"titled", "closable", "resizable"})
-            :windowTitle("Scratchpad")
-            :closeOnEscape(false) -- We handle Escape manually for saving
-            :windowCallback(function(action, wv, state)
-                if action == "closing" then
-                    -- Save before hiding
-                    webview:evaluateJavaScript(
-                        GET_CONTENT_JS,
-                        function(result, error)
-                            if result and result ~= EDITOR_NOT_READY then saveFile(result) end
-                        end
-                    )
-                    isVisible = false
-                end
-            end)
+        -- Clicking elsewhere saves and hides, like Spotlight
+        webview = panel.new(WIDTH, HEIGHT, usercontent, function() saveAndHide(false) end)
     end
-
-    -- Reposition to cursor's screen each time
-    local screen = hs.mouse.getCurrentScreen():frame()
-    local width = 600
-    local height = 400
-    webview:frame({
-        x = screen.x + (screen.w - width) / 2,
-        y = screen.y + (screen.h - height) / 2,
-        w = width,
-        h = height
-    })
 
     -- Check for iCloud conflicts
     checkForConflicts()
@@ -306,8 +294,7 @@ local function showWebview()
         return
     end
     webview:html(buildHTML(content))
-    webview:show()
-    webview:hswindow():focus()
+    panel.show(webview, WIDTH, HEIGHT)
     isVisible = true
     print("Scratchpad shown")
 end
@@ -316,20 +303,7 @@ local function toggleWebview()
     if isTransitioning then return end
 
     if isVisible then
-        isTransitioning = true
-        if webview then
-            webview:evaluateJavaScript(
-                GET_CONTENT_JS,
-                function(result, error)
-                    if result and result ~= EDITOR_NOT_READY then saveFile(result) end
-                    hideWebview()
-                    isTransitioning = false
-                end
-            )
-        else
-            hideWebview()
-            isTransitioning = false
-        end
+        saveAndHide(true)
     else
         showWebview()
     end

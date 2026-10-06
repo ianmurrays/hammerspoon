@@ -3,6 +3,7 @@
 
 local M = {}
 local htmlLoader = require("html_loader")
+local panel = require("panel")
 
 -- ============================================
 -- PRIVATE STATE
@@ -17,6 +18,7 @@ local wifiWatcher = nil
 local updateCallback = nil
 local customStatusWebview = nil
 local updateSlackStatus
+local applyManualStatus, clearStatus
 
 -- ============================================
 -- HELPER FUNCTIONS
@@ -54,20 +56,45 @@ end
 -- CUSTOM STATUS FORM
 -- ============================================
 
+local EXPIRY_LABELS = { ["30"] = "30 min", ["60"] = "1 hour", ["120"] = "2 hours", ["240"] = "4 hours",
+    eod = "End of day", ["0"] = "Don't clear" }
+
 local function buildCustomStatusHTML()
-    return htmlLoader.load("slack_status")
+    local presets = {}
+    for i, status in ipairs(config.manualStatuses) do
+        table.insert(presets, {
+            index = i,
+            emoji = status.name:match("^(.-) ") or "💬",
+            text = status.text,
+            expiry = status.useEndOfDay and EXPIRY_LABELS.eod or EXPIRY_LABELS["0"],
+        })
+    end
+    -- "</" must become "<\/" so preset text can't terminate the inlined script block
+    local json = hs.json.encode(presets):gsub("</", "<\\/")
+    return htmlLoader.load("slack_status", { ["{{PRESETS}}"] = json })
+end
+
+-- Height of the palette before JS measures itself: search row, preset rows, emoji section, footer
+local PALETTE_WIDTH = 600
+local function paletteHeight()
+    return 56 + 41 + #config.manualStatuses * 37 + 8 + 104 + 38
+end
+
+local function closeCustomStatusForm(restoreFocus)
+    local wv = customStatusWebview
+    if not wv then return end
+    customStatusWebview = nil
+    panel.hide(wv, restoreFocus)
+    wv:delete()
 end
 
 local function showCustomStatusForm()
-    -- Close existing form if open
-    if customStatusWebview then
-        customStatusWebview:delete()
-        customStatusWebview = nil
-    end
+    closeCustomStatusForm(false)
 
     local uc = hs.webview.usercontent.new("customStatus")
     uc:setCallback(function(msg)
         local body = msg.body
+        if type(body) ~= "table" then return end
         if body.action == "submit" then
             local expiration = 0
             if body.expiration == "eod" then
@@ -77,38 +104,30 @@ local function showCustomStatusForm()
             end
             cancelPendingWifiUpdate()
             updateSlackStatus(body.text, body.emoji, expiration, true, "✏️")
-            if customStatusWebview then
-                customStatusWebview:delete()
-                customStatusWebview = nil
+            closeCustomStatusForm(true)
+        elseif body.action == "preset" then
+            local status = config.manualStatuses[tonumber(body.index)]
+            if status then applyManualStatus(status) end
+            closeCustomStatusForm(true)
+        elseif body.action == "clear" then
+            clearStatus()
+            closeCustomStatusForm(true)
+        elseif body.action == "resize" then
+            local wv = customStatusWebview
+            local h = tonumber(body.height)
+            if wv and h then
+                local f = wv:frame()
+                wv:frame({ x = f.x, y = f.y, w = f.w, h = math.ceil(h) + 2 * panel.MARGIN })
             end
         elseif body.action == "cancel" then
-            if customStatusWebview then
-                customStatusWebview:delete()
-                customStatusWebview = nil
-            end
+            closeCustomStatusForm(true)
         end
     end)
 
-    local screen = hs.screen.mainScreen():frame()
-    local w, h = 400, 460
-    local frame = hs.geometry.rect(
-        (screen.w - w) / 2 + screen.x,
-        (screen.h - h) / 2 + screen.y,
-        w, h
-    )
-
-    customStatusWebview = hs.webview.new(frame, { javaScriptEnabled = true }, uc)
-    customStatusWebview:windowTitle("Set Custom Status")
-    customStatusWebview:allowTextEntry(true)
-    customStatusWebview:level(hs.drawing.windowLevels.modalPanel)
-    customStatusWebview:windowCallback(function(action, wv)
-        if action == "closing" then
-            customStatusWebview = nil
-        end
-    end)
+    local h = paletteHeight()
+    customStatusWebview = panel.new(PALETTE_WIDTH, h, uc, function() closeCustomStatusForm(false) end)
     customStatusWebview:html(buildCustomStatusHTML())
-    customStatusWebview:show()
-    customStatusWebview:hswindow():focus()
+    panel.show(customStatusWebview, PALETTE_WIDTH, h)
 end
 
 -- ============================================
@@ -240,6 +259,22 @@ end
 -- MENU BAR
 -- ============================================
 
+applyManualStatus = function(status)
+    local expiration = status.useEndOfDay and getEndOfDayTimestamp() or 0
+    -- Extract emoji from name (everything before first space)
+    local menuEmoji = status.name:match("^(.-) ") or "💬"
+    cancelPendingWifiUpdate()
+    updateSlackStatus(status.text, status.emoji, expiration, true, menuEmoji)
+end
+
+clearStatus = function()
+    print("Clearing Slack status")
+    manualStatusActive = false
+    stopStatusRefreshTimer()
+    cancelPendingWifiUpdate()
+    updateSlackStatus("", "", 0, false, "💬")
+end
+
 local function buildMenu()
     local menuItems = {}
 
@@ -247,13 +282,7 @@ local function buildMenu()
     for _, status in ipairs(config.manualStatuses) do
         table.insert(menuItems, {
             title = status.name,
-            fn = function()
-                local expiration = status.useEndOfDay and getEndOfDayTimestamp() or 0
-                -- Extract emoji from name (everything before first space)
-                local menuEmoji = status.name:match("^(.-) ") or "💬"
-                cancelPendingWifiUpdate()
-                updateSlackStatus(status.text, status.emoji, expiration, true, menuEmoji)
-            end
+            fn = function() applyManualStatus(status) end
         })
     end
 
@@ -274,13 +303,7 @@ local function buildMenu()
     -- Clear status option
     table.insert(menuItems, {
         title = "Clear Status",
-        fn = function()
-            print("Clearing Slack status from menu bar")
-            manualStatusActive = false
-            stopStatusRefreshTimer()
-            cancelPendingWifiUpdate()
-            updateSlackStatus("", "", 0, false, "💬")
-        end
+        fn = function() clearStatus() end
     })
 
     -- Separator
@@ -431,10 +454,7 @@ function M.stop()
     end
 
     -- Close custom status form if open
-    if customStatusWebview then
-        customStatusWebview:delete()
-        customStatusWebview = nil
-    end
+    closeCustomStatusForm(false)
 
     updateCallback = nil
 

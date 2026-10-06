@@ -5,6 +5,7 @@
 
 local M = {}
 local htmlLoader = require("html_loader")
+local panel = require("panel")
 
 -- Config defaults
 local config = {
@@ -230,7 +231,9 @@ pushEntriesToJS = function()
     webview:evaluateJavaScript(string.format("if (window.loadEntries) window.loadEntries('%s')", json))
 end
 
--- Show the clipboard history webview
+local WIDTH, HEIGHT = 820, 470
+
+-- Show the clipboard history panel
 showWebview = function()
     if not webview then
         local usercontent = hs.webview.usercontent.new("clipboardHistory")
@@ -240,6 +243,13 @@ showWebview = function()
                 if action == "copy" then
                     lastSetByUs = msg.body.text
                     hs.pasteboard.setContents(msg.body.text)
+                    hideWebview(true)
+                elseif action == "paste" then
+                    -- Entries are stored as plain text, so "paste as plain text" is the same call
+                    lastSetByUs = msg.body.text
+                    hs.pasteboard.setContents(msg.body.text)
+                    hideWebview(true)
+                    hs.timer.doAfter(0.15, function() hs.eventtap.keyStroke({"cmd"}, "v") end)
                 elseif action == "delete" then
                     local targetId = msg.body.id
                     for i, entry in ipairs(entries) do
@@ -251,67 +261,33 @@ showWebview = function()
                     persistToDisk()
                     pushEntriesToJS()
                 elseif action == "close" then
-                    hideWebview()
+                    hideWebview(true)
                 elseif action == "ready" then
                     pushEntriesToJS()
                 end
             end)
 
-        local screen = hs.mouse.getCurrentScreen():frame()
-        local width = 720
-        local height = 550
-        local rect = {
-            x = screen.x + (screen.w - width) / 2,
-            y = screen.y + (screen.h - height) / 2,
-            w = width,
-            h = height
-        }
-
-        webview = hs.webview.new(rect, { developerExtrasEnabled = false }, usercontent)
-            :allowTextEntry(true)
-            :windowStyle({"titled", "closable", "resizable"})
-            :windowTitle("Clipboard History")
-            :closeOnEscape(false)
-            :windowCallback(function(action, _wv, _state)
-                if action == "closing" then
-                    webviewVisible = false
-                    webview = nil
-                end
-            end)
-
+        webview = panel.new(WIDTH, HEIGHT, usercontent, function() hideWebview(false) end)
         webview:html(htmlLoader.load("clipboard_history"))
     end
 
-    -- Reposition to cursor's screen each time
-    local screen = hs.mouse.getCurrentScreen():frame()
-    local width = 720
-    local height = 550
-    webview:frame({
-        x = screen.x + (screen.w - width) / 2,
-        y = screen.y + (screen.h - height) / 2,
-        w = width,
-        h = height
-    })
-
     webview:evaluateJavaScript("if (window.resetUI) window.resetUI()")
-
-    webview:show()
-    webview:hswindow():focus()
+    panel.show(webview, WIDTH, HEIGHT)
     webviewVisible = true
 
     pushEntriesToJS()
 end
 
-hideWebview = function()
+hideWebview = function(restoreFocus)
     if webview and webviewVisible then
-        webview:hide()
         webviewVisible = false
+        panel.hide(webview, restoreFocus)
     end
 end
 
 toggleWebview = function()
     if webviewVisible then
-        hideWebview()
+        hideWebview(true)
     else
         showWebview()
     end

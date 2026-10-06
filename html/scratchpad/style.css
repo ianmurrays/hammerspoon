@@ -1,9 +1,76 @@
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #212121; padding: 8px; height: 100vh; }
-    .CodeMirror {
-      height: calc(100vh - 16px);
-      font-family: 'SF Mono', Menlo, Monaco, monospace;
-      font-size: 14px;
-      line-height: 1.5;
-      border-radius: 4px;
-    }
+.pad-header {
+  height: 44px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 18px;
+}
+.pad-title { font-size: 13px; font-weight: 600; color: rgba(235, 235, 245, 0.8); }
+.pad-status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: rgba(235, 235, 245, 0.5); }
+.pad-status .dot { width: 6px; height: 6px; border-radius: 3px; background: #30D158; }
+.pad-status.edited .dot { background: #FFD60A; }
+.pad-editor { flex: 1; min-height: 0; padding: 4px 28px 0; }
+.pad-footer {
+  height: 36px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 18px;
+  font-size: 12px;
+  color: rgba(235, 235, 245, 0.5);
+}
+.pad-footer .spacer { flex: 1; }
+.pad-footer .hint { display: flex; gap: 6px; align-items: center; }
+
+/* CodeMirror theme */
+.pad-editor .CodeMirror {
+  height: 100%;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.9);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.pad-editor .CodeMirror-lines { padding: 0; }
+.pad-editor .CodeMirror pre.CodeMirror-line { padding: 0; }
+.pad-editor .CodeMirror-cursor { border-left: 2px solid var(--accent); }
+.pad-editor .CodeMirror-selected { background: rgba(10, 132, 255, 0.3) !important; }
+.pad-editor .cm-header { color: #fff; }
+.pad-editor .cm-header-1 { font-size: 22px; font-weight: 700; line-height: 1.5; }
+.pad-editor .cm-header-2 { font-size: 17px; font-weight: 650; }
+.pad-editor .cm-header-3, .pad-editor .cm-header-4 { font-size: 15px; font-weight: 600; }
+.pad-editor .cm-formatting-header { color: rgba(235, 235, 245, 0.3); font-weight: 500; }
+.pad-editor .cm-comment {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: #FFB86B;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+}
+.pad-editor .cm-link, .pad-editor .cm-url { color: #64B0FF; text-decoration: underline; text-decoration-color: rgba(100, 176, 255, 0.4); }
+.pad-editor .cm-strong { font-weight: 700; }
+.pad-editor .cm-em { font-style: italic; }
+.pad-editor .cm-quote { color: rgba(235, 235, 245, 0.6); }
+.pad-editor .cm-variable-2, .pad-editor .cm-variable-3, .pad-editor .cm-keyword { color: inherit; }
+.pad-editor .cm-formatting-list { color: rgba(235, 235, 245, 0.45); }
+
+/* Task checkboxes (markText widgets over "[ ]" / "[x]") */
+.pad-editor .task-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  box-sizing: border-box;
+  box-shadow: 0 0 0 1.5px rgba(235, 235, 245, 0.35) inset;
+  vertical-align: -2px;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 800;
+  color: #fff;
+}
+.pad-editor .task-box.done { background: var(--accent); box-shadow: none; }
+.pad-editor .task-done { color: rgba(235, 235, 245, 0.45); text-decoration: line-through; }

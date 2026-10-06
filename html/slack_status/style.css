@@ -1,88 +1,47 @@
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    background: #212121;
-    font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
-    color: #e0e0e0;
-    padding: 20px;
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
-  }
-  label {
-    font-size: 13px;
-    color: #aaa;
-    margin-bottom: 4px;
-    display: block;
-  }
-  input, select {
-    width: 100%;
-    padding: 8px 12px;
-    font-size: 14px;
-    background: #2c2c2c;
-    border: 1px solid #444;
-    border-radius: 6px;
-    color: #e0e0e0;
-    outline: none;
-    margin-bottom: 14px;
-  }
-  input:focus, select:focus { border-color: #6c9bff; }
-  input::placeholder { color: #666; }
-  select { -webkit-appearance: none; cursor: pointer; }
-  .emoji-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    margin-bottom: 12px;
-  }
-  .emoji-btn {
-    width: 34px;
-    height: 34px;
-    font-size: 20px;
-    background: transparent;
-    border: 2px solid transparent;
-    border-radius: 6px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-  }
-  .emoji-btn:hover { background: #3a3a3a; }
-  .emoji-btn.selected { background: #4a9eff; border-color: #6c9bff; }
-  .custom-code {
-    width: 100%;
-    padding: 6px 10px;
-    font-size: 13px;
-    background: #2c2c2c;
-    border: 1px solid #444;
-    border-radius: 6px;
-    color: #e0e0e0;
-    outline: none;
-    margin-bottom: 14px;
-  }
-  .custom-code:focus { border-color: #6c9bff; }
-  .custom-code::placeholder { color: #666; }
-  .buttons {
-    display: flex;
-    justify-content: flex-end;
-    gap: 10px;
-    margin-top: auto;
-    padding-top: 14px;
-  }
-  .buttons button {
-    padding: 8px 20px;
-    font-size: 14px;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-  }
-  .buttons button.cancel {
-    background: #444;
-    color: #ccc;
-  }
-  .buttons button.cancel:hover { background: #555; }
-  .buttons button.submit {
-    background: #4a9eff;
-    color: #fff;
-  }
-  .buttons button.submit:hover { background: #3a8eef; }
+body { height: auto; }
+.panel { height: auto; }
+.emoji-pick, .duration { border: none; font: inherit; cursor: pointer; }
+.emoji-pick { background: transparent; font-size: 22px; padding: 0; width: 28px; color: #fff; }
+.emoji-pick.code { font-size: 12px; width: auto; color: var(--label); font-family: var(--mono); }
+.duration {
+  font-size: 12px;
+  color: rgba(235, 235, 245, 0.6);
+  background: rgba(255, 255, 255, 0.08);
+  padding: 4px 9px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.rows { padding: 8px; display: flex; flex-direction: column; gap: 1px; }
+.rows .row {
+  height: 36px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 10px;
+  cursor: pointer;
+}
+.rows .row.selected { background: var(--accent); }
+.rows .row .e { font-size: 17px; width: 22px; text-align: center; }
+.rows .row .t { flex: 1; font-size: 14px; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rows .row .x { font-size: 12px; color: var(--label-2); white-space: nowrap; }
+.rows .row.selected .x { color: rgba(255, 255, 255, 0.8); }
+.emoji-section { padding: 4px 18px 14px; border-top: 1px solid var(--sep); }
+.emoji-section .panel-section { padding: 10px 0 8px; }
+.emoji-grid { display: flex; gap: 2px; flex-wrap: wrap; }
+.emoji-grid .emoji-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 17px;
+  padding: 0;
+  cursor: pointer;
+}
+.emoji-grid .emoji-btn:hover { background: rgba(255, 255, 255, 0.08); }
+.emoji-grid .emoji-btn.selected { background: rgba(10, 132, 255, 0.35); }
+.emoji-grid.active .emoji-btn.cursor { box-shadow: 0 0 0 2px var(--accent) inset; }

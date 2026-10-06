@@ -133,7 +133,19 @@ html/
   clipboard_history/  — Clipboard history viewer
 ```
 
-Each directory contains `index.html`, `style.css`, and `script.js`. At runtime, `html_loader.lua` reads these files and inlines the CSS/JS into the HTML before passing it to `hs.webview:html()`.
+Each directory contains `index.html`, `style.css`, and `script.js`. At runtime, `html_loader.lua` reads these files and inlines the CSS/JS into the HTML before passing it to `hs.webview:html()`. It puts the shared `html/panel.css` in front of every module's `style.css`.
+
+All 5 webviews are borderless, transparent launcher panels made by `panel.lua`. They close on Esc, which returns focus to the previous app, and hide when you click elsewhere. Each panel lists its keys in its footer:
+
+| Panel | Keys |
+|---|---|
+| Clipboard history | ↵ / ⇧↵ paste into the previous app, ⌘C copy, ⌘⌫ delete, ↑↓ move |
+| GIF finder | Searches as you type. ↵ copy URL, ⌘↵ copy HTML, ⌘D favorite, ⇥ next tab, arrows move |
+| STT history | ↵ copy polished, ⌥↵ copy original, ↑↓ move (the selected entry shows the diff) |
+| Scratchpad | ⌘↵ turn the cursor's line into a task, or check and uncheck it, Esc save and close |
+| Slack custom status | Type to filter presets or set free text (`:emoji: text` sets a custom emoji), ↵ set, ⇥ emoji grid, ⌥←→ duration, ⌘⌫ clear status |
+
+Alerts from `stt`, `eject_lock`, and `whatcable` use the canvas toasts in `toast.lua`.
 
 ## Setup
 
@@ -203,11 +215,11 @@ To dictate in more than 1 language:
 2. Set `locales = { "en-US", "es-CL" }` in the `stt.init` call in `init.lua`.
 3. Reload the Hammerspoon config.
 
-A tap of fn+Shift (less than 250 ms) switches to the next locale and shows it in an alert. The locale stays until the next tap, and fn+Space uses it too. When the locale is not the first one, the pill shows it after "Recording…".
+A tap of fn+Shift (less than 250 ms) switches to the next locale and shows it in a toast. The locale stays until the next tap, and fn+Space uses it too. While recording, the pill shows a 2-letter badge for the current locale.
 
 #### LLM Post-Processing (Optional)
 
-When a Mistral API key is present in the keychain, transcribed text is sent through the Mistral API to remove filler words, fix punctuation/capitalization, and apply light grammar corrections. The pill overlay shows a purple "Polishing..." spinner during this step. If the API call fails or times out (10s), the raw transcription is pasted instead. With the Apple backend, the request also gives the locale of the recording (for example `es-CL`), so that Mistral does not guess the language.
+When a Mistral API key is present in the keychain, transcribed text is sent through the Mistral API to remove filler words, fix punctuation/capitalization, and apply light grammar corrections. The pill overlay shows a purple "Polishing" spinner during this step. If the API call fails or times out (10s), the raw transcription is pasted instead. With the Apple backend, the request also gives the locale of the recording (for example `es-CL`), so that Mistral does not guess the language.
 
 Configuration options in `init.lua`:
 

@@ -25,6 +25,8 @@
 local M = {}
 local htmlLoader = require("html_loader")
 local stallLog = require("stall_log")
+local panel = require("panel")
+local toast = require("toast")
 
 -- Config defaults
 local config = {
@@ -53,11 +55,13 @@ local config = {
 -- History
 local HISTORY_DIR = os.getenv("HOME") .. "/Library/Mobile Documents/com~apple~CloudDocs/STT"
 local HISTORY_FILE = HISTORY_DIR .. "/history.txt"
+local HISTORY_W, HISTORY_H = 680, 500
 
 -- Overlay
-local PILL_WIDTH = 220
-local PILL_HEIGHT = 36
-local spinnerFrames = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+local PILL_HEIGHT = 40
+local PILL_MARGIN = 24              -- canvas padding around the capsule, for its shadow
+local PILL_MID = PILL_MARGIN + PILL_HEIGHT / 2
+local LEVEL_BARS = 20
 
 -- State: "idle" | "starting" | "recording" | "transcribing" | "polishing"
 local state = "idle"
@@ -70,6 +74,12 @@ local fnShiftStarted = false   -- the last fn+shift press started a session
 local localeIndex = 1          -- index into config.locales
 local sessionLocale = nil      -- locale sent with the last "start" command
 local animTimer = nil
+local elapsedTimer = nil
+local doneTimer = nil
+-- Pill: state ("starting" .. "done"), spin (spinner degrees), recordStart/elapsed (s),
+-- live (tail of the apple partial transcript), words, screen, w (capsule width)
+local pill = {}
+local pillIdx = {}  -- canvas element indexes: spinner, wave (first bar), waveN, waveX
 local connectTimer = nil
 local stopTimeout = nil
 local idleTimer = nil
@@ -86,7 +96,7 @@ local historyHotkey = nil
 local historyVisible = false
 
 -- Forward declarations
-local showPill, updatePill, hideOverlay
+local showPill, updatePill, hideOverlay, renderPill, showPasted
 local connectAndStart, retryConnect, sendCommand, handleMessage
 local pasteText, cleanup, startDaemon, stopDaemon, resetIdleTimer, postProcessText, drawWaveform
 local appendHistory, cleanupWav
@@ -297,68 +307,36 @@ showHistoryWebview = function()
                 local action = msg.body.action
                 if action == "copy" then
                     hs.pasteboard.setContents(msg.body.text)
+                    hideHistoryWebview(true)
                 elseif action == "close" then
-                    hideHistoryWebview()
+                    hideHistoryWebview(true)
                 elseif action == "ready" then
                     pushHistoryToJS()
                 end
             end)
 
-        local screen = hs.mouse.getCurrentScreen():frame()
-        local width = 720
-        local height = 550
-        local rect = {
-            x = screen.x + (screen.w - width) / 2,
-            y = screen.y + (screen.h - height) / 2,
-            w = width,
-            h = height
-        }
-
-        historyWebview = hs.webview.new(rect, { developerExtrasEnabled = false }, usercontent)
-            :allowTextEntry(true)
-            :windowStyle({"titled", "closable", "resizable"})
-            :windowTitle("STT History")
-            :closeOnEscape(false)
-            :windowCallback(function(action, _wv, _state)
-                if action == "closing" then
-                    historyVisible = false
-                    historyWebview = nil
-                end
-            end)
-
+        historyWebview = panel.new(HISTORY_W, HISTORY_H, usercontent, function() hideHistoryWebview(false) end)
         historyWebview:html(htmlLoader.load("stt_history"))
     end
 
-    -- Reposition to cursor's screen each time
-    local screen = hs.mouse.getCurrentScreen():frame()
-    local width = 720
-    local height = 550
-    historyWebview:frame({
-        x = screen.x + (screen.w - width) / 2,
-        y = screen.y + (screen.h - height) / 2,
-        w = width,
-        h = height
-    })
-
     historyWebview:evaluateJavaScript("if (window.resetUI) window.resetUI()")
-
-    historyWebview:show()
-    historyWebview:hswindow():focus()
+    panel.show(historyWebview, HISTORY_W, HISTORY_H)
     historyVisible = true
 
     pushHistoryToJS()
 end
 
-hideHistoryWebview = function()
+-- restoreFocus: re-activate the app that was frontmost before (false when hiding on blur)
+hideHistoryWebview = function(restoreFocus)
     if historyWebview and historyVisible then
-        historyWebview:hide()
         historyVisible = false
+        panel.hide(historyWebview, restoreFocus)
     end
 end
 
 toggleHistoryWebview = function()
     if historyVisible then
-        hideHistoryWebview()
+        hideHistoryWebview(true)
     else
         showHistoryWebview()
     end
@@ -474,7 +452,7 @@ handleMessage = function(data)
                     return
                 end
                 playTone("done")
-                hideOverlay()
+                showPasted(text)
                 pasteText(text)
                 appendHistory(rawText, text)
                 cleanupWav(wavPath)
@@ -483,7 +461,7 @@ handleMessage = function(data)
             end)
         else
             playTone("done")
-            hideOverlay()
+            showPasted(msg.text)
             pasteText(msg.text)
             appendHistory(msg.text, nil)
             cleanupWav(wavPath)
@@ -496,22 +474,20 @@ handleMessage = function(data)
         if state == "recording" and canvas then
             local words = {}
             for word in msg.text:gmatch("%S+") do words[#words + 1] = word end
-            local tail = table.concat(words, " ", math.max(1, #words - 4))
-            canvas[3].text = hs.styledtext.new((#words > 5 and "…" or "") .. tail, {
-                font = {name = ".AppleSystemUIFont", size = 14},
-                color = {white = 1},
-                paragraphStyle = {lineBreak = "truncateHead"},
-            })
+            if #words > 0 then
+                pill.live = (#words > 5 and "…" or "") .. table.concat(words, " ", math.max(1, #words - 4))
+                renderPill()
+            end
         end
 
     elseif msg.type == "audio_level" then
         table.insert(levelBuf, msg.rms or 0)
-        if #levelBuf > 5 then table.remove(levelBuf, 1) end
+        if #levelBuf > LEVEL_BARS then table.remove(levelBuf, 1) end
         if state == "recording" then drawWaveform() end
 
     elseif msg.type == "error" then
         if stopTimeout then stopTimeout:stop(); stopTimeout = nil end
-        hs.alert.show("STT: " .. (msg.message or "unknown error"))
+        toast.show({icon = "!", title = "Dictation failed", detail = msg.message, tint = "red", seconds = 3})
         if msg.wav_path then
             print("stt: WAV preserved for debugging: " .. msg.wav_path)
         end
@@ -523,181 +499,283 @@ handleMessage = function(data)
 end
 
 -- ── Overlay ───────────────────────────────────────────────────────
+-- A capsule at the bottom centre of the main screen. renderPill() lays the elements out
+-- left to right for the current pill.state and resizes the canvas to fit; the spinner tick
+-- and audio levels only move existing elements.
+
+local WHITE = {white = 1}
+local DIM = {red = 235 / 255, green = 235 / 255, blue = 245 / 255, alpha = 0.6}
+local DIMMER = {red = 235 / 255, green = 235 / 255, blue = 245 / 255, alpha = 0.45}
+local PURPLE = {hex = "#BF5AF2"}
+local PURPLE_TEXT = {hex = "#D49BF8"}
+local RED = {hex = "#FF453A"}
+
+local function styled(s, size, color, mono, truncateHead)
+    return hs.styledtext.new(s, {
+        font = {name = mono and "Menlo" or ".AppleSystemUIFont", size = size},
+        color = color,
+        paragraphStyle = truncateHead and {lineBreak = "truncateHead"} or nil,
+    })
+end
+
+local function fmtElapsed(secs)
+    return string.format("%d:%02d", math.floor(secs / 60), secs % 60)
+end
+
+-- Layout parts: {w = width, draw = function(x, els) appends elements at x}
+local function textPart(st, maxW)
+    local size = hs.drawing.getTextDrawingSize(st)
+    local w = math.ceil(size.w) + 2
+    if maxW and w > maxW then w = maxW end
+    local h = math.ceil(size.h)
+    return {w = w, draw = function(x, els)
+        els[#els + 1] = {type = "text", text = st, frame = {x = x, y = PILL_MID - h / 2, w = w, h = h + 2}}
+    end}
+end
+
+local function spinnerPart(color, track)
+    return {w = 12, draw = function(x, els)
+        local c = {x = x + 6, y = PILL_MID}
+        els[#els + 1] = {type = "circle", center = c, radius = 5, action = "stroke",
+                         strokeWidth = 2, strokeColor = track}
+        pillIdx.spinner = #els + 1
+        els[#els + 1] = {type = "arc", center = c, radius = 5, arcRadii = false, action = "stroke",
+                         startAngle = pill.spin, endAngle = pill.spin + 90,
+                         strokeWidth = 2, strokeColor = color}
+    end}
+end
+
+local function dotPart()
+    return {w = 8, draw = function(x, els)
+        local c = {x = x + 4, y = PILL_MID}
+        els[#els + 1] = {type = "circle", center = c, radius = 5.5, action = "fill",
+                         fillColor = {hex = "#FF453A", alpha = 0.25}}
+        els[#els + 1] = {type = "circle", center = c, radius = 4, action = "fill", fillColor = RED}
+    end}
+end
+
+local function wavePart(n)
+    return {w = n * 4 - 2, draw = function(x, els)
+        pillIdx.wave, pillIdx.waveN, pillIdx.waveX = #els + 1, n, x
+        for i = 1, n do
+            els[#els + 1] = {type = "rectangle", action = "fill", fillColor = {white = 1, alpha = 0.88},
+                             roundedRectRadii = {xRadius = 1, yRadius = 1},
+                             frame = {x = x + (i - 1) * 4, y = PILL_MID - 1, w = 2, h = 2}}
+        end
+    end}
+end
+
+local function badgePart(label)
+    local st = styled(label, 10, {red = 235 / 255, green = 235 / 255, blue = 245 / 255, alpha = 0.8})
+    local size = hs.drawing.getTextDrawingSize(st)
+    local tw, th = math.ceil(size.w) + 2, math.ceil(size.h)
+    return {w = tw + 10, draw = function(x, els)
+        els[#els + 1] = {type = "rectangle", action = "fill", fillColor = {white = 1, alpha = 0.1},
+                         roundedRectRadii = {xRadius = 4, yRadius = 4},
+                         frame = {x = x, y = PILL_MID - th / 2 - 2, w = tw + 10, h = th + 4}}
+        els[#els + 1] = {type = "text", text = st, frame = {x = x + 5, y = PILL_MID - th / 2, w = tw, h = th + 2}}
+    end}
+end
+
+-- Stop (square) while recording, cancel (×) otherwise
+local function buttonPart(stop)
+    return {w = 24, draw = function(x, els)
+        els[#els + 1] = {type = "circle", center = {x = x + 12, y = PILL_MID}, radius = 12, action = "fill",
+                         fillColor = {white = 1, alpha = stop and 0.1 or 0.08}}
+        if stop then
+            els[#els + 1] = {type = "rectangle", action = "fill", fillColor = WHITE,
+                             roundedRectRadii = {xRadius = 2, yRadius = 2},
+                             frame = {x = x + 8, y = PILL_MID - 4, w = 8, h = 8}}
+        else
+            local st = hs.styledtext.new("×", {font = {name = ".AppleSystemUIFont", size = 14}, color = DIM,
+                                                paragraphStyle = {alignment = "center"}})
+            els[#els + 1] = {type = "text", text = st, frame = {x = x, y = PILL_MID - 9, w = 24, h = 18}}
+        end
+    end}
+end
+
+local function checkPart()
+    return {w = 18, draw = function(x, els)
+        els[#els + 1] = {type = "circle", center = {x = x + 9, y = PILL_MID}, radius = 9, action = "fill",
+                         fillColor = {hex = "#30D158"}}
+        local st = hs.styledtext.new("✓", {font = {name = ".AppleSystemUIFont", size = 11},
+                                            color = {hex = "#0b2a14"}, paragraphStyle = {alignment = "center"}})
+        els[#els + 1] = {type = "text", text = st, frame = {x = x, y = PILL_MID - 8, w = 18, h = 16}}
+    end}
+end
 
 local function rmsToHeight(rms)
-    if rms < 1e-7 then return 1 end
+    if rms < 1e-7 then return 2 end
     local db = 20 * math.log(rms, 10)
     if db < -50 then db = -50 end
     if db > -10 then db = -10 end
-    return math.floor(1 + (db + 50) / 40 * 13 + 0.5)
+    return math.floor(2 + (db + 50) / 40 * 18 + 0.5)
 end
 
+-- Centred level meter, newest level on the right
 drawWaveform = function()
-    if not canvas then return end
-    local barBottom = (PILL_HEIGHT - 18) / 2 + 16
-    for i = 1, 5 do
-        local rms = levelBuf[i] or 0
-        local h = rmsToHeight(rms)
-        canvas[4 + i].frame = {x = 14 + (i - 1) * 4, y = barBottom - h, w = 2, h = h}
+    if not canvas or not pillIdx.wave then return end
+    local n = pillIdx.waveN
+    for i = 1, n do
+        local h = rmsToHeight(levelBuf[#levelBuf - n + i] or 0)
+        canvas[pillIdx.wave + i - 1].frame = {x = pillIdx.waveX + (i - 1) * 4, y = PILL_MID - h / 2, w = 2, h = h}
     end
+end
+
+renderPill = function()
+    if not canvas then return end
+    local st = pill.state
+    local parts = {}
+    local function add(p) parts[#parts + 1] = p end
+    local padL, padR, gap = 14, 8, 10
+    local stroke = {white = 1, alpha = 0.16}
+    local elapsed = pill.recordStart and (os.time() - pill.recordStart) or pill.elapsed
+
+    if st == "starting" then
+        add(spinnerPart({white = 1, alpha = 0.85}, {white = 1, alpha = 0.18}))
+        add(textPart(styled(config.backend == "apple" and "Starting" or "Loading model", 13, DIM)))
+        add(buttonPart(false))
+    elseif st == "recording" then
+        add(dotPart())
+        if config.backend == "apple" and #config.locales > 1 then
+            add(badgePart((config.locales[localeIndex] or ""):sub(1, 2):upper()))
+        end
+        if pill.live then
+            add(textPart(styled(pill.live, 13, WHITE, false, true), 240))
+            add(wavePart(6))
+        else
+            add(wavePart(20))
+            add(textPart(styled(fmtElapsed(elapsed), 12, DIM, true)))
+        end
+        add(buttonPart(true))
+    elseif st == "transcribing" then
+        add(spinnerPart({white = 1, alpha = 0.85}, {white = 1, alpha = 0.18}))
+        add(textPart(styled("Transcribing", 13, WHITE)))
+        add(textPart(styled(fmtElapsed(elapsed), 12, DIMMER, true)))
+        add(buttonPart(false))
+    elseif st == "polishing" then
+        stroke = {hex = "#BF5AF2", alpha = 0.45}
+        add(spinnerPart(PURPLE, {hex = "#BF5AF2", alpha = 0.25}))
+        add(textPart(styled("Polishing", 13, PURPLE_TEXT)))
+        add(textPart(styled((config.llm_model:gsub("%-latest$", "")), 12, DIMMER)))
+        add(buttonPart(false))
+    elseif st == "done" then
+        padL, padR, gap = 12, 16, 8
+        add(checkPart())
+        add(textPart(styled("Pasted", 13, WHITE)))
+        add(textPart(styled(pill.words .. (pill.words == 1 and " word" or " words"), 12, DIMMER)))
+    end
+
+    local w = padL + padR + gap * (#parts - 1)
+    for _, p in ipairs(parts) do w = w + p.w end
+    pill.w = w
+
+    pillIdx = {}
+    local els = {{
+        type = "rectangle", action = "strokeAndFill",
+        frame = {x = PILL_MARGIN, y = PILL_MARGIN, w = w, h = PILL_HEIGHT},
+        roundedRectRadii = {xRadius = PILL_HEIGHT / 2, yRadius = PILL_HEIGHT / 2},
+        fillColor = {red = 28 / 255, green = 28 / 255, blue = 30 / 255, alpha = 0.94},
+        strokeColor = stroke, strokeWidth = 1,
+        withShadow = true, shadow = {blurRadius = 24, color = {alpha = 0.35}, offset = {h = -8, w = 0}},
+    }}
+    local x = PILL_MARGIN + padL
+    for _, p in ipairs(parts) do
+        p.draw(x, els)
+        x = x + p.w + gap
+    end
+
+    local sf = pill.screen:frame()
+    canvas:frame({
+        x = sf.x + (sf.w - w) / 2 - PILL_MARGIN,
+        y = sf.y + sf.h - PILL_HEIGHT - 40 - PILL_MARGIN,
+        w = w + 2 * PILL_MARGIN,
+        h = PILL_HEIGHT + 2 * PILL_MARGIN,
+    })
+    canvas:replaceElements(els)
+    drawWaveform()
+end
+
+local function stopPillTimers()
+    if animTimer then animTimer:stop(); animTimer = nil end
+    if elapsedTimer then elapsedTimer:stop(); elapsedTimer = nil end
+    if doneTimer then doneTimer:stop(); doneTimer = nil end
 end
 
 showPill = function(pillState)
-    if canvas then canvas:delete(); canvas = nil end
-    if animTimer then animTimer:stop(); animTimer = nil end
-
-    local screen = hs.screen.mainScreen()
-    local sf = screen:frame()
-    -- The apple backend shows live words in the pill, so the pill is wider.
-    local w, h = config.backend == "apple" and 320 or PILL_WIDTH, PILL_HEIGHT
-    local x = sf.x + (sf.w - w) / 2
-    local y = sf.y + sf.h - h - 40
-    local ty = (h - 18) / 2
-
-    canvas = hs.canvas.new({x = x, y = y, w = w, h = h})
-    canvas:appendElements(
-        -- [1] Background pill
-        {type = "rectangle", fillColor = {hex = "#1a1a2e", alpha = 0.9},
-         roundedRectRadii = {xRadius = h / 2, yRadius = h / 2}, action = "fill"},
-        -- [2] Status indicator
-        {type = "text", frame = {x = 14, y = ty, w = 18, h = 18}, text = ""},
-        -- [3] Status text
-        {type = "text", frame = {x = 34, y = ty, w = w - 74, h = 18}, text = ""},
-        -- [4] Stop button
-        {type = "text", frame = {x = w - 36, y = (h - 24) / 2, w = 28, h = 24},
-         text = hs.styledtext.new("×", {
-             font = {name = ".AppleSystemUIFont", size = 20},
-             color = {white = 0.6},
-             paragraphStyle = {alignment = "center"},
-         })}
-    )
-    -- [5]-[9] Waveform bars (hidden initially, shown during recording)
-    local barBottom = ty + 16
-    for i = 0, 4 do
-        canvas:appendElements({
-            type = "rectangle",
-            frame = {x = 14 + i * 4, y = barBottom - 1, w = 2, h = 1},
-            fillColor = {white = 1, alpha = 0},
-            action = "fill",
-            roundedRectRadii = {xRadius = 1, yRadius = 1},
-        })
-    end
-
+    hideOverlay()
+    pill = {state = pillState, spin = 0, elapsed = 0, words = 0, screen = hs.screen.mainScreen()}
+    canvas = hs.canvas.new({x = 0, y = 0, w = 1, h = 1})
     canvas:level(hs.canvas.windowLevels.overlay)
     canvas:behavior({"canJoinAllSpaces", "stationary"})
 
-    canvas:mouseCallback(function(c, cbMsg, id, mx, my)
-        if cbMsg == "mouseDown" and mx > w - 36 then
-            print("stt: stop button clicked, state=" .. state)
-            if state == "recording" or state == "transcribing" then
-                sendCommand("stop")
-            elseif state == "polishing" then
-                resumeMedia()
-                hideOverlay()
-                cleanup()
-                resetIdleTimer()
-            elseif state == "starting" then
-                hideOverlay()
-                cleanup()
-            end
+    -- Stop/cancel button: the last 32px of the capsule
+    canvas:mouseCallback(function(_c, cbMsg, _id, mx, my)
+        if cbMsg ~= "mouseDown" or not pill.w then return end
+        local right = PILL_MARGIN + pill.w
+        if mx < right - 32 or mx > right or my < PILL_MARGIN or my > PILL_MARGIN + PILL_HEIGHT then return end
+        print("stt: stop button clicked, state=" .. state)
+        if state == "recording" or state == "transcribing" then
+            sendCommand("stop")
+        elseif state == "polishing" then
+            resumeMedia()
+            hideOverlay()
+            cleanup()
+            resetIdleTimer()
+        elseif state == "starting" then
+            hideOverlay()
+            cleanup()
         end
     end)
     canvas:canvasMouseEvents(true, false, false, false)
 
-    canvas:show()
     updatePill(pillState)
+    canvas:show()
 end
 
 updatePill = function(pillState)
     if not canvas then return end
-    if animTimer then animTimer:stop(); animTimer = nil end
+    stopPillTimers()
 
-    -- Hide waveform bars by default (recording state will show them)
-    for i = 5, 9 do
-        if canvas[i] then canvas[i].fillColor = {white = 1, alpha = 0} end
+    -- Elapsed time counts from the start of recording and freezes when it ends
+    if pillState == "recording" then
+        pill.recordStart = pill.recordStart or os.time()
+        elapsedTimer = hs.timer.doEvery(1, function()
+            if not pill.live then renderPill() end
+        end)
+    elseif pill.recordStart then
+        pill.elapsed = os.time() - pill.recordStart
+        pill.recordStart = nil
     end
+    if pillState == "starting" then pill.elapsed = 0 end
 
-    if pillState == "starting" then
-        canvas[2].text = hs.styledtext.new(spinnerFrames[1], {
-            font = {name = "Menlo", size = 14},
-            color = {white = 0.7},
-            paragraphStyle = {alignment = "center"},
-        })
-        canvas[3].text = hs.styledtext.new(config.backend == "apple" and "Starting…" or "Loading model…", {
-            font = {name = ".AppleSystemUIFont", size = 14},
-            color = {white = 0.7},
-        })
-        local idx = 1
+    pill.state = pillState
+    renderPill()
+
+    if pillState == "starting" or pillState == "transcribing" or pillState == "polishing" then
         animTimer = hs.timer.doEvery(0.08, function()
-            if not canvas then return end
-            idx = (idx % #spinnerFrames) + 1
-            canvas[2].text = hs.styledtext.new(spinnerFrames[idx], {
-                font = {name = "Menlo", size = 14},
-                color = {white = 0.7},
-                paragraphStyle = {alignment = "center"},
-            })
-        end)
-
-    elseif pillState == "recording" then
-        canvas[2].text = hs.styledtext.new("", {})
-        -- Show the locale when it is not the first one, because the choice stays.
-        local label = localeIndex > 1 and "Recording… " .. config.locales[localeIndex] or "Recording…"
-        canvas[3].text = hs.styledtext.new(label, {
-            font = {name = ".AppleSystemUIFont", size = 14},
-            color = {white = 1},
-        })
-        for i = 5, 9 do
-            if canvas[i] then canvas[i].fillColor = {white = 1, alpha = 0.7} end
-        end
-        drawWaveform()
-
-    elseif pillState == "transcribing" then
-        canvas[2].text = hs.styledtext.new(spinnerFrames[1], {
-            font = {name = "Menlo", size = 14},
-            color = {white = 0.7},
-            paragraphStyle = {alignment = "center"},
-        })
-        canvas[3].text = hs.styledtext.new("Transcribing…", {
-            font = {name = ".AppleSystemUIFont", size = 14},
-            color = {white = 0.7},
-        })
-        local idx = 1
-        animTimer = hs.timer.doEvery(0.08, function()
-            if not canvas then return end
-            idx = (idx % #spinnerFrames) + 1
-            canvas[2].text = hs.styledtext.new(spinnerFrames[idx], {
-                font = {name = "Menlo", size = 14},
-                color = {white = 0.7},
-                paragraphStyle = {alignment = "center"},
-            })
-        end)
-
-    elseif pillState == "polishing" then
-        canvas[2].text = hs.styledtext.new(spinnerFrames[1], {
-            font = {name = "Menlo", size = 14},
-            color = {hex = "#a78bfa"},
-            paragraphStyle = {alignment = "center"},
-        })
-        canvas[3].text = hs.styledtext.new("Polishing…", {
-            font = {name = ".AppleSystemUIFont", size = 14},
-            color = {hex = "#a78bfa"},
-        })
-        local idx = 1
-        animTimer = hs.timer.doEvery(0.08, function()
-            if not canvas then return end
-            idx = (idx % #spinnerFrames) + 1
-            canvas[2].text = hs.styledtext.new(spinnerFrames[idx], {
-                font = {name = "Menlo", size = 14},
-                color = {hex = "#a78bfa"},
-                paragraphStyle = {alignment = "center"},
-            })
+            if not canvas or not pillIdx.spinner then return end
+            pill.spin = (pill.spin + 30) % 360
+            canvas[pillIdx.spinner].startAngle = pill.spin
+            canvas[pillIdx.spinner].endAngle = pill.spin + 90
         end)
     end
 end
 
+-- "Pasted · N words" for 0.8s, then hide
+showPasted = function(text)
+    local n = 0
+    for _ in (text or ""):gmatch("%S+") do n = n + 1 end
+    if not canvas or n == 0 then hideOverlay(); return end
+    pill.words = n
+    updatePill("done")
+    doneTimer = hs.timer.doAfter(0.8, hideOverlay)
+end
+
 hideOverlay = function()
-    if animTimer then animTimer:stop(); animTimer = nil end
+    stopPillTimers()
     if canvas then canvas:delete(); canvas = nil end
+    pillIdx = {}
 end
 
 -- ── Connection ────────────────────────────────────────────────────
@@ -714,7 +792,7 @@ end
 retryConnect = function(attempt)
     if state ~= "starting" then return end
     if attempt > 60 then
-        hs.alert.show("STT: daemon failed to start")
+        toast.show({icon = "!", title = "Daemon failed to start", tint = "red", seconds = 3})
         resumeMedia()
         hideOverlay()
         cleanup()
@@ -858,7 +936,8 @@ function M.init(cfg)
                     if isTap then
                         localeIndex = localeIndex % #config.locales + 1
                         print("stt: tap, locale=" .. config.locales[localeIndex])
-                        hs.alert.show("STT: " .. config.locales[localeIndex], 1)
+                        toast.show({icon = "Aa", title = "Dictation language", segments = config.locales,
+                                    active = localeIndex, tint = "blue", seconds = 1.5})
                         -- Discard the session that this press started. The daemon
                         -- discards the recording when the socket disconnects.
                         if fnShiftStarted and state ~= "idle" then

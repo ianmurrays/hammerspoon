@@ -1,106 +1,78 @@
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-  background: #212121;
-  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
-  color: #e0e0e0;
-  padding: 12px;
-  height: 100vh;
+.panel-search input { font-size: 17px; }
+.clip-body { flex: 1; min-height: 0; display: flex; }
+.clip-list {
+  width: 320px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--sep);
+  padding: 6px 8px;
   display: flex;
   flex-direction: column;
-}
-#filter-box {
-  width: 100%;
-  padding: 10px 14px;
-  font-size: 15px;
-  background: #2c2c2c;
-  border: 1px solid #444;
-  border-radius: 6px;
-  color: #e0e0e0;
-  outline: none;
-  flex-shrink: 0;
-}
-#filter-box:focus { border-color: #6c9bff; }
-#filter-box::placeholder { color: #777; }
-#status {
-  text-align: center;
-  padding: 16px;
-  color: #888;
-  font-size: 13px;
-  flex-shrink: 0;
-}
-#entries {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 1px;
   overflow-y: auto;
-  min-height: 0;
-  flex: 1;
+  box-sizing: border-box;
 }
-.entry-card {
-  background: #2c2c2c;
-  border-radius: 6px;
-  padding: 10px 12px;
-  cursor: pointer;
-  transition: background 0.1s;
-}
-.entry-card:hover { background: #353535; }
-.entry-header {
+.clip-list .panel-empty { padding: 24px 8px; }
+.clip-row {
+  border-radius: 8px;
+  padding: 8px 10px;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 6px;
-}
-.entry-header .timestamp {
-  font-size: 12px;
-  color: #888;
-}
-.entry-header .app-name {
-  font-size: 11px;
-  color: #999;
-  background: #3a3a3a;
-  padding: 1px 6px;
-  border-radius: 3px;
-}
-.entry-body {
-  display: flex;
+  gap: 10px;
   align-items: flex-start;
-  gap: 8px;
+  cursor: default;
+  flex-shrink: 0;
 }
-.entry-body .text {
+.clip-row.selected { background: var(--accent); }
+.clip-tile {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.clip-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.clip-line {
+  font-size: 13px;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.clip-line.mono, .clip-preview.mono { font-family: var(--mono); }
+.clip-sub { font-size: 11px; color: var(--label-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.clip-row.selected .clip-line { color: #fff; }
+.clip-row.selected .clip-sub { color: rgba(255, 255, 255, 0.8); }
+.clip-detail { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.clip-detail.empty { visibility: hidden; }
+.clip-preview {
   flex: 1;
-  font-size: 14px;
-  line-height: 1.4;
+  min-height: 0;
+  margin: 14px 16px 0;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.25);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06) inset;
+  padding: 14px 16px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.9);
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 4.2em;
-  overflow: hidden;
+  overflow-y: auto;
+  user-select: text;
 }
-.entry-actions {
-  flex-shrink: 0;
-  display: flex;
-  gap: 4px;
-  align-items: flex-start;
-}
-.entry-actions .copy-btn,
-.entry-actions .delete-btn {
-  background: #444;
-  border: none;
-  border-radius: 4px;
-  color: #ccc;
+.clip-preview.mono { font-size: 12.5px; line-height: 1.65; }
+.clip-meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 16px;
+  row-gap: 6px;
+  padding: 14px 18px;
   font-size: 12px;
-  padding: 4px 10px;
-  cursor: pointer;
-  font-family: inherit;
-  white-space: nowrap;
 }
-.entry-actions .copy-btn:hover { background: #555; color: #fff; }
-.entry-actions .copy-btn.copied {
-  background: #2d5a2d;
-  color: #7ddb7d;
-}
-.entry-actions .delete-btn {
-  padding: 4px 8px;
-  color: #666;
-}
-.entry-actions .delete-btn:hover { color: #ff6b6b; background: #3a2020; }
+.clip-meta .k { color: var(--label-2); }
+.clip-meta .v { color: rgba(255, 255, 255, 0.85); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

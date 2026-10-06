@@ -4,51 +4,47 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <label>Emoji</label>
-  <div class="emoji-grid" id="emojiGrid">
-    <button class="emoji-btn selected" data-code=":speech_balloon:" type="button">&#x1F4AC;</button>
-    <button class="emoji-btn" data-code=":house:" type="button">&#x1F3E0;</button>
-    <button class="emoji-btn" data-code=":office:" type="button">&#x1F3E2;</button>
-    <button class="emoji-btn" data-code=":coffee:" type="button">&#x2615;</button>
-    <button class="emoji-btn" data-code=":fork_and_knife:" type="button">&#x1F37D;&#xFE0F;</button>
-    <button class="emoji-btn" data-code=":phone:" type="button">&#x1F4DE;</button>
-    <button class="emoji-btn" data-code=":face_with_thermometer:" type="button">&#x1F912;</button>
-    <button class="emoji-btn" data-code=":books:" type="button">&#x1F4DA;</button>
-    <button class="emoji-btn" data-code=":dart:" type="button">&#x1F3AF;</button>
-    <button class="emoji-btn" data-code=":briefcase:" type="button">&#x1F4BC;</button>
-    <button class="emoji-btn" data-code=":airplane:" type="button">&#x2708;&#xFE0F;</button>
-    <button class="emoji-btn" data-code=":beach_with_umbrella:" type="button">&#x1F3D6;&#xFE0F;</button>
-    <button class="emoji-btn" data-code=":car:" type="button">&#x1F697;</button>
-    <button class="emoji-btn" data-code=":runner:" type="button">&#x1F3C3;</button>
-    <button class="emoji-btn" data-code=":mute:" type="button">&#x1F507;</button>
-    <button class="emoji-btn" data-code=":calendar:" type="button">&#x1F4C5;</button>
-    <button class="emoji-btn" data-code=":palm_tree:" type="button">&#x1F334;</button>
-    <button class="emoji-btn" data-code=":headphones:" type="button">&#x1F3A7;</button>
-    <button class="emoji-btn" data-code=":writing_hand:" type="button">&#x270D;&#xFE0F;</button>
-    <button class="emoji-btn" data-code=":microscope:" type="button">&#x1F52C;</button>
+  <div class="panel" id="panel">
+    <div class="panel-search">
+      <button class="emoji-pick" id="emojiPick" type="button" tabindex="-1" title="Emoji (Tab)">💬</button>
+      <input type="text" id="statusText" placeholder="What's your status?" autocomplete="off" spellcheck="false" autofocus>
+      <button class="duration" id="duration" type="button" tabindex="-1" title="Clear after (⌥←→)">1 hour</button>
+    </div>
+    <div class="rows" id="rows"></div>
+    <div class="emoji-section">
+      <div class="panel-section">Emoji</div>
+      <div class="emoji-grid" id="emojiGrid">
+        <button class="emoji-btn" data-code=":speech_balloon:" type="button" tabindex="-1">&#x1F4AC;</button>
+        <button class="emoji-btn" data-code=":house:" type="button" tabindex="-1">&#x1F3E0;</button>
+        <button class="emoji-btn" data-code=":office:" type="button" tabindex="-1">&#x1F3E2;</button>
+        <button class="emoji-btn" data-code=":coffee:" type="button" tabindex="-1">&#x2615;</button>
+        <button class="emoji-btn" data-code=":fork_and_knife:" type="button" tabindex="-1">&#x1F37D;&#xFE0F;</button>
+        <button class="emoji-btn" data-code=":phone:" type="button" tabindex="-1">&#x1F4DE;</button>
+        <button class="emoji-btn" data-code=":face_with_thermometer:" type="button" tabindex="-1">&#x1F912;</button>
+        <button class="emoji-btn" data-code=":books:" type="button" tabindex="-1">&#x1F4DA;</button>
+        <button class="emoji-btn" data-code=":dart:" type="button" tabindex="-1">&#x1F3AF;</button>
+        <button class="emoji-btn" data-code=":briefcase:" type="button" tabindex="-1">&#x1F4BC;</button>
+        <button class="emoji-btn" data-code=":airplane:" type="button" tabindex="-1">&#x2708;&#xFE0F;</button>
+        <button class="emoji-btn" data-code=":beach_with_umbrella:" type="button" tabindex="-1">&#x1F3D6;&#xFE0F;</button>
+        <button class="emoji-btn" data-code=":car:" type="button" tabindex="-1">&#x1F697;</button>
+        <button class="emoji-btn" data-code=":runner:" type="button" tabindex="-1">&#x1F3C3;</button>
+        <button class="emoji-btn" data-code=":mute:" type="button" tabindex="-1">&#x1F507;</button>
+        <button class="emoji-btn" data-code=":calendar:" type="button" tabindex="-1">&#x1F4C5;</button>
+        <button class="emoji-btn" data-code=":palm_tree:" type="button" tabindex="-1">&#x1F334;</button>
+        <button class="emoji-btn" data-code=":headphones:" type="button" tabindex="-1">&#x1F3A7;</button>
+        <button class="emoji-btn" data-code=":writing_hand:" type="button" tabindex="-1">&#x270D;&#xFE0F;</button>
+        <button class="emoji-btn" data-code=":microscope:" type="button" tabindex="-1">&#x1F52C;</button>
+      </div>
+    </div>
+    <div class="panel-footer">
+      <span class="hint"><span class="kbd">↵</span>Set</span>
+      <span class="hint"><span class="kbd">⇥</span>Emoji</span>
+      <span class="hint"><span class="kbd">⌥←→</span>Duration</span>
+      <span class="hint"><span class="kbd">⌘⌫</span>Clear status</span>
+      <span class="spacer"></span>
+      <span class="hint"><span class="kbd">esc</span>Cancel</span>
+    </div>
   </div>
-
-  <label>Or enter Slack shortcode</label>
-  <input class="custom-code" type="text" id="customCode" placeholder=":custom_emoji:">
-
-  <label>Status text</label>
-  <input type="text" id="statusText" placeholder="What's your status?" autofocus>
-
-  <label>Clear after</label>
-  <select id="expiration">
-    <option value="30">30 minutes</option>
-    <option value="60" selected>1 hour</option>
-    <option value="120">2 hours</option>
-    <option value="240">4 hours</option>
-    <option value="eod">End of day</option>
-    <option value="0">Don't clear</option>
-  </select>
-
-  <div class="buttons">
-    <button class="cancel" onclick="doCancel()">Cancel</button>
-    <button class="submit" onclick="doSubmit()">Set Status</button>
-  </div>
-
   <script src="script.js"></script>
 </body>
 </html>

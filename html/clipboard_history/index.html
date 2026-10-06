@@ -1,12 +1,36 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <meta charset="utf-8">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <input type="text" id="filter-box" placeholder="Search clipboard history..." autofocus>
-  <div id="status">No entries yet</div>
-  <div id="entries"></div>
+  <div class="panel">
+    <div class="panel-search">
+      <svg width="16" height="16" viewBox="0 0 18 18" fill="none" stroke="rgba(235,235,245,0.55)" stroke-width="1.9" stroke-linecap="round"><circle cx="7.5" cy="7.5" r="5.5"></circle><path d="M11.6 11.6L16 16"></path></svg>
+      <input type="text" id="filter-box" placeholder="Search clipboard history" autofocus spellcheck="false">
+      <span class="panel-count" id="count"></span>
+    </div>
+    <div class="clip-body">
+      <div class="clip-list" id="list"></div>
+      <div class="clip-detail" id="detail">
+        <div class="clip-preview" id="preview"></div>
+        <div class="clip-meta">
+          <span class="k">Source</span><span class="v" id="meta-source"></span>
+          <span class="k">Copied</span><span class="v" id="meta-copied"></span>
+          <span class="k">Content</span><span class="v" id="meta-content"></span>
+        </div>
+      </div>
+    </div>
+    <div class="panel-footer">
+      <span class="hint"><span class="kbd">↵</span>Paste</span>
+      <span class="hint"><span class="kbd">⇧↵</span>Paste as plain text</span>
+      <span class="hint"><span class="kbd">⌘C</span>Copy</span>
+      <span class="hint"><span class="kbd">⌘⌫</span>Delete</span>
+      <span class="spacer"></span>
+      <span class="hint"><span class="kbd">esc</span>Close</span>
+    </div>
+  </div>
   <script src="script.js"></script>
 </body>
 </html>

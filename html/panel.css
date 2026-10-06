@@ -1,0 +1,81 @@
+/* Shared launcher panel (prepended to every module's style.css by html_loader).
+   The window is transparent; .panel draws the rounded surface, inset 30px (panel.lua MARGIN)
+   so its shadow has room. */
+:root {
+  --panel-bg: rgba(30, 30, 32, 0.96);
+  --sep: rgba(255, 255, 255, 0.08);
+  --text: #fff;
+  --text-2: rgba(255, 255, 255, 0.88);
+  --label: rgba(235, 235, 245, 0.55);
+  --label-2: rgba(235, 235, 245, 0.45);
+  --accent: #0A84FF;
+  --purple: #D49BF8;
+  --mono: 'SF Mono', Menlo, monospace;
+}
+html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+body {
+  padding: 30px;
+  box-sizing: border-box;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+.panel {
+  height: 100%;
+  box-sizing: border-box;
+  border-radius: 14px;
+  background: var(--panel-bg);
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.08) inset, 0 24px 60px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.panel-search {
+  height: 56px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--sep);
+}
+.panel-search svg { flex-shrink: 0; }
+.panel-search input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 20px;
+  caret-color: var(--accent);
+}
+.panel-search input::placeholder { color: rgba(235, 235, 245, 0.35); }
+.panel-count { font-size: 12px; color: var(--label-2); white-space: nowrap; }
+.panel-section { font-size: 11px; font-weight: 600; color: var(--label-2); padding: 8px 10px 4px; }
+.panel-empty { padding: 24px; text-align: center; font-size: 13px; color: var(--label-2); }
+.panel-footer {
+  height: 38px;
+  flex-shrink: 0;
+  border-top: 1px solid var(--sep);
+  background: rgba(255, 255, 255, 0.03);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 16px;
+  font-size: 12px;
+  color: var(--label);
+}
+.panel-footer .hint { display: flex; gap: 6px; align-items: center; white-space: nowrap; }
+.panel-footer .spacer { flex: 1; }
+.kbd {
+  font-size: 11px;
+  color: rgba(235, 235, 245, 0.8);
+  background: rgba(255, 255, 255, 0.08);
+  border: 0.5px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 4px; }

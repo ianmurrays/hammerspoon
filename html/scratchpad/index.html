@@ -2,11 +2,22 @@
 <html>
 <head>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-darker.min.css">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <textarea id="content"></textarea>
+  <div class="panel">
+    <div class="pad-header">
+      <span class="pad-title">Scratchpad</span>
+      <span class="pad-status" id="status"><span class="dot"></span><span id="statusText">Saved · Encrypted · iCloud</span></span>
+    </div>
+    <div class="pad-editor"><textarea id="content"></textarea></div>
+    <div class="pad-footer">
+      <span id="words">0 words</span>
+      <span class="spacer"></span>
+      <span class="hint"><span class="kbd">⌘↵</span>Toggle task</span>
+      <span class="hint"><span class="kbd">esc</span>Save &amp; close</span>
+    </div>
+  </div>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/markdown/markdown.min.js"></script>
   <script src="script.js"></script>

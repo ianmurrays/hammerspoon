@@ -13,6 +13,9 @@
 
 local M = {}
 local htmlLoader = require("html_loader")
+local panel = require("panel")
+
+local WIDTH, HEIGHT = 740, 520
 
 -- Private state
 local webview = nil
@@ -86,14 +89,20 @@ local function saveRecents()
     writeJsonFile(RECENTS_PATH, recents)
 end
 
-local function addToRecents(thumb, url)
+-- Stored GIF: { thumb, url, width, height, title }; entries saved before the redesign
+-- only have thumb and url, and the UI treats them as square and untitled.
+local function gifEntry(g)
+    return { thumb = g.thumb, url = g.url, width = g.width, height = g.height, title = g.title }
+end
+
+local function addToRecents(gif)
     local filtered = {}
     for _, r in ipairs(recents) do
-        if r.url ~= url then
+        if r.url ~= gif.url then
             table.insert(filtered, r)
         end
     end
-    table.insert(filtered, 1, { thumb = thumb, url = url })
+    table.insert(filtered, 1, gifEntry(gif))
     while #filtered > 10 do
         table.remove(filtered)
     end
@@ -101,25 +110,25 @@ local function addToRecents(thumb, url)
     saveRecents()
 end
 
-local function toggleFavorite(thumb, url)
-    if favoritesSet[url] then
+local function toggleFavorite(gif)
+    if favoritesSet[gif.url] then
         local filtered = {}
         for _, fav in ipairs(favorites) do
-            if fav.url ~= url then
+            if fav.url ~= gif.url then
                 table.insert(filtered, fav)
             end
         end
         favorites = filtered
     else
-        table.insert(favorites, { thumb = thumb, url = url })
+        table.insert(favorites, gifEntry(gif))
     end
     saveFavorites()
 end
 
 local function pushJsonToJS(fnName, data)
     if not webview or not isVisible then return end
-    local json = hs.json.encode(data):gsub("'", "\\'")
-    webview:evaluateJavaScript(string.format("if (window.%s) window.%s('%s')", fnName, fnName, json))
+    -- JSON is a valid JS literal, so it is passed as-is (no string escaping to get wrong)
+    webview:evaluateJavaScript(string.format("if (window.%s) window.%s(%s)", fnName, fnName, hs.json.encode(data)))
 end
 
 pushFavoritesToJS = function()
@@ -135,10 +144,10 @@ local function buildHTML()
     return htmlLoader.load("gif_finder")
 end
 
-local function hideWebview()
+local function hideWebview(restoreFocus)
     if webview and isVisible then
-        webview:hide()
         isVisible = false
+        panel.hide(webview, restoreFocus)
     end
 end
 
@@ -175,16 +184,16 @@ local function searchKlipy(query)
 
         local gifs = {}
         for _, item in ipairs(parsed.data.data) do
-            local thumb = item.file
-                and item.file.sm
-                and item.file.sm.gif
-                and item.file.sm.gif.url
-            local full = item.file
-                and item.file.hd
-                and item.file.hd.gif
-                and item.file.hd.gif.url
-            if thumb and full then
-                table.insert(gifs, { thumb = thumb, url = full })
+            local sm = item.file and item.file.sm and item.file.sm.gif
+            local hd = item.file and item.file.hd and item.file.hd.gif
+            if sm and sm.url and hd and hd.url then
+                table.insert(gifs, {
+                    thumb = sm.url,
+                    url = hd.url,
+                    width = tonumber(sm.width or hd.width),
+                    height = tonumber(sm.height or hd.height),
+                    title = item.title,
+                })
             end
         end
 
@@ -202,25 +211,25 @@ local function showWebview()
                 if action == "search" then
                     searchKlipy(msg.body.query)
                 elseif action == "select" then
-                    addToRecents(msg.body.thumb, msg.body.url)
-                    hs.pasteboard.setContents(msg.body.url)
+                    addToRecents(msg.body.gif)
+                    hs.pasteboard.setContents(msg.body.gif.url)
                     hs.notify.new({
                         title = "GIF Finder",
                         informativeText = "GIF URL copied to clipboard",
                         withdrawAfter = 3
                     }):send()
-                    hideWebview()
+                    hideWebview(true)
                 elseif action == "selectHtml" then
-                    addToRecents(msg.body.thumb, msg.body.url)
-                    hs.pasteboard.setContents('<img src="' .. msg.body.url .. '">')
+                    addToRecents(msg.body.gif)
+                    hs.pasteboard.setContents('<img src="' .. msg.body.gif.url .. '">')
                     hs.notify.new({
                         title = "GIF Finder",
                         informativeText = "GIF img tag copied to clipboard",
                         withdrawAfter = 3
                     }):send()
-                    hideWebview()
+                    hideWebview(true)
                 elseif action == "close" then
-                    hideWebview()
+                    hideWebview(true)
                 elseif action == "switchTab" then
                     currentTab = msg.body.tab
                     if msg.body.tab == "favorites" then
@@ -229,34 +238,14 @@ local function showWebview()
                         pushJsonToJS("showResults", recents)
                     end
                 elseif action == "toggleFavorite" then
-                    toggleFavorite(msg.body.thumb, msg.body.url)
+                    toggleFavorite(msg.body.gif)
                     if currentTab == "favorites" then
                         pushJsonToJS("showResults", favorites)
                     end
                 end
             end)
 
-        local screen = hs.mouse.getCurrentScreen():frame()
-        local width = 720
-        local height = 500
-        local rect = {
-            x = screen.x + (screen.w - width) / 2,
-            y = screen.y + (screen.h - height) / 2,
-            w = width,
-            h = height
-        }
-
-        webview = hs.webview.new(rect, { developerExtrasEnabled = false }, usercontent)
-            :allowTextEntry(true)
-            :windowStyle({"titled", "closable", "resizable"})
-            :windowTitle("GIF Finder")
-            :closeOnEscape(false)
-            :windowCallback(function(action, _wv, _state)
-                if action == "closing" then
-                    isVisible = false
-                    webview = nil
-                end
-            end)
+        webview = panel.new(WIDTH, HEIGHT, usercontent, function() hideWebview(false) end)
 
         webview:html(buildHTML())
     end
@@ -265,24 +254,12 @@ local function showWebview()
     loadFavorites()
     loadRecents()
 
-    -- Reposition to cursor's screen each time
-    local screen = hs.mouse.getCurrentScreen():frame()
-    local width = 720
-    local height = 500
-    webview:frame({
-        x = screen.x + (screen.w - width) / 2,
-        y = screen.y + (screen.h - height) / 2,
-        w = width,
-        h = height
-    })
-
     -- Reset UI on re-show
     currentTab = "search"
     webview:evaluateJavaScript("if (window.resetUI) window.resetUI()")
 
-    webview:show()
-    webview:hswindow():focus()
     isVisible = true
+    panel.show(webview, WIDTH, HEIGHT)
 
     -- Push favorites set for star rendering
     pushFavoritesToJS()
@@ -290,7 +267,7 @@ end
 
 local function toggleWebview()
     if isVisible then
-        hideWebview()
+        hideWebview(true)
     else
         showWebview()
     end

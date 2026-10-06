@@ -4,14 +4,27 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <input type="text" id="search-box" placeholder="Search for GIFs..." autofocus>
-  <div id="tabs">
-    <button class="active" data-tab="search">Search</button>
-    <button data-tab="favorites">Favorites</button>
-    <button data-tab="recents">Recents</button>
+  <div class="panel">
+    <div class="panel-search">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="rgba(235,235,245,0.55)" stroke-width="1.8" stroke-linecap="round"><circle cx="7.5" cy="7.5" r="5.5"></circle><path d="M11.6 11.6L16 16"></path></svg>
+      <input type="text" id="search-box" placeholder="Search GIFs" autofocus spellcheck="false">
+      <div id="tabs">
+        <button class="active" data-tab="search">Search</button>
+        <button data-tab="favorites">★ Favorites</button>
+        <button data-tab="recents">Recents</button>
+      </div>
+    </div>
+    <div id="results"></div>
+    <div id="status" class="panel-empty"></div>
+    <div class="panel-footer">
+      <span class="hint"><span class="kbd">↵</span>Copy URL</span>
+      <span class="hint"><span class="kbd">⌘↵</span>Copy HTML</span>
+      <span class="hint"><span class="kbd">⌘D</span>Favorite</span>
+      <span class="hint"><span class="kbd">⇥</span>Next tab</span>
+      <span class="spacer"></span>
+      <span>Powered by Klipy</span>
+    </div>
   </div>
-  <div id="status">Type a search term and press Enter</div>
-  <div id="results"></div>
   <script src="script.js"></script>
 </body>
 </html>

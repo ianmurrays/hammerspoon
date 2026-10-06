@@ -15,7 +15,9 @@ function M.load(name, replacements)
     end
 
     local html = readFile("index.html")
-    local css = readFile("style.css")
+    local panelFile = io.open(hs.configdir .. "/html/panel.css", "r")
+    local css = panelFile:read("*a") .. "\n" .. readFile("style.css")
+    panelFile:close()
     local js = readFile("script.js")
 
     -- Apply replacements to JS content before inlining
