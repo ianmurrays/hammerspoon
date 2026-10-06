@@ -9,12 +9,12 @@
 -- 3. URLs older than purgeAfterDays (default 7) are automatically removed
 
 local M = {}
+local stallLog = require("stall_log")
 
 -- Private state
 local config = {}
 local paths = {}
 local pathWatcher = nil
-local pollTimer = nil
 local debounceTimer = nil
 local recentUrls = {}
 local machineId = ""
@@ -162,11 +162,17 @@ end
 
 -- Process inbox and open new URLs
 local function processInbox()
+	-- The iCloud file I/O below can block the main thread (and all keyboard input) for more than 1 s.
+	local t0 = hs.timer.absoluteTime()
 	-- Purge old entries first
 	purgeFiles()
 
 	local inboxEntries = readEntries(paths.inbox)
 	local processedEntries = readEntries(paths.processed)
+	local ms = (hs.timer.absoluteTime() - t0) / 1e6
+	if ms > 100 then
+		stallLog.log(string.format("Hyperduck: processInbox file I/O took %.0f ms", ms))
+	end
 
 	-- Create lookup table for processed URLs (by URL, ignoring timestamp)
 	local processed = {}
@@ -244,11 +250,11 @@ function M.init(cfg)
 	-- Process any existing URLs on startup
 	processInbox()
 
-	-- Start pathwatcher for inbox file
+	-- Start pathwatcher for inbox file.
+	-- ponytail: no backup poll. On most runs, the 300 s poll blocked the main thread for 1 to 2 s,
+	-- which delayed the keyboard. If the pathwatcher misses an iCloud update, the next change
+	-- or the next reload opens the URL.
 	pathWatcher = hs.pathwatcher.new(paths.inbox, onInboxChanged):start()
-
-	-- Start backup polling timer (5 minutes)
-	pollTimer = hs.timer.doEvery(300, processInbox)
 
 	print("Hyperduck loaded")
 	return M
@@ -258,11 +264,6 @@ function M.stop()
 	if pathWatcher then
 		pathWatcher:stop()
 		pathWatcher = nil
-	end
-
-	if pollTimer then
-		pollTimer:stop()
-		pollTimer = nil
 	end
 
 	if debounceTimer then
