@@ -24,6 +24,7 @@
 
 local M = {}
 local htmlLoader = require("html_loader")
+local stallLog = require("stall_log")
 
 -- Config defaults
 local config = {
@@ -818,6 +819,14 @@ function M.init(cfg)
         function(event)
             local evType = event:getType()
             local flags = event:getFlags()
+
+            -- Delivery lag: the time from the key press to this callback. eventTime()
+            -- gives 0 lag for synthesized events (such as the keyStrokes paste).
+            local lag = hs.timer.absoluteTime() - eventTime(event)
+            if lag > 150e6 then
+                local name = evType == hs.eventtap.event.types.keyDown and "keyDown" or "flagsChanged"
+                stallLog.log(string.format("%s event arrived %.0f ms late", name, lag / 1e6))
+            end
 
             -- fn+space → toggle
             if evType == hs.eventtap.event.types.keyDown then

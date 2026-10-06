@@ -14,6 +14,7 @@ local unifiedMenu = require("unified_menu")
 local ejectLock = require("eject_lock")
 local whatcable = require("whatcable")
 local keyboardLock = require("keyboard_lock")
+local stallLog = require("stall_log")
 
 -- Read Slack token from macOS Keychain
 -- One-time setup: security add-generic-password -a "$USER" -s "slack-status-token" -w "xoxp-your-token-here"
@@ -167,3 +168,7 @@ unifiedMenu.init({
 	clipboardHistory = clipboardHistory,
 	keyboardLock = keyboardLock,
 })
+
+-- Initialize Stall Log (writes keyboard delay data to ~/Library/Logs/hammerspoon-stall.log).
+-- Initialize it last, because the config load itself blocks the main thread.
+stallLog.init({})

@@ -36,6 +36,7 @@ return M
 | `eject_lock` | Eject key gestures via a `systemDefined` eventtap + `systemKey()`: double-tap locks the screen, 4s hold runs the "Eject TimeMachine Disk" Shortcut (`/usr/bin/shortcuts run`); modifier combos pass through | Double-tap Eject / Hold Eject 4s |
 | `whatcable` | Menubar view of USB-C/Thunderbolt port data via the `whatcable` CLI (`hs.task` + `--json`); refreshes on USB/battery/screen watcher events (2s debounce) plus 60s fallback timer | — |
 | `keyboard_lock` | Keyboard clean mode: full-screen `hs.canvas` overlay plus an eventtap that swallows keyDown/keyUp/flagsChanged/systemDefined; tap is created at lock time so head-insertion puts it ahead of the `stt`/`eject_lock` taps; unlock by holding Esc or the mouse button 3s and releasing (mouse is deliberately not blocked; a short click does nothing), or the 5-minute cap | Ctrl+Alt+K |
+| `stall_log` | Diagnoses keyboard delays: a 0.25s `hs.timer` records main-thread stalls over 0.5s (with the console tail, for attribution) to `~/Library/Logs/hammerspoon-stall.log`; `stt`'s tap calls `log()` when a keyDown/flagsChanged event arrives over 150 ms late (`hs.timer.absoluteTime() - event:timestamp()`). Initialized last in `init.lua`, because the config load blocks the main thread | — |
 
 **Unified menu integration:** Modules that appear in the unified menubar expose `getMenuItems()` (returns menu table) and optionally `setUpdateCallback(fn)` so the unified menu can refresh when state changes.
 

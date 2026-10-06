@@ -20,6 +20,7 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | `eject_lock` | Locks the screen when the Magic Keyboard's Eject key is double-tapped; holding Eject for 4 seconds runs the "Eject TimeMachine Disk" macOS Shortcut (modifier combos like Cmd+Alt+Eject pass through untouched) | Double-tap Eject / Hold Eject 4s |
 | `whatcable` | Menubar view of USB-C/Thunderbolt port data (link speed, cable capabilities, charging, displays, connected device tree, cable trust warnings) via the [whatcable](https://github.com/darrylmorley/whatcable) CLI; refreshes on USB/power/display changes | — |
 | `keyboard_lock` | Locks the keyboard so you can clean it: a full-screen overlay plus an event tap that swallows keys, modifiers and media keys; a hold of Esc or the mouse button for 3 seconds unlocks | Ctrl+Alt+K |
+| `stall_log` | Writes keyboard delay data to `~/Library/Logs/hammerspoon-stall.log`: each time the Hammerspoon main thread blocks for more than 0.5 s (with the last 1000 characters of the console), and each key event that arrives more than 150 ms late | — |
 
 ## Hotkeys
 
