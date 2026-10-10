@@ -266,22 +266,28 @@ local function saveAndHide(restoreFocus)
     )
 end
 
-local function showWebview()
-    if not webview then
-        -- Create user content controller for JS -> Lua messages
-        local usercontent = hs.webview.usercontent.new("scratchpad")
-            :setCallback(function(msg)
-                if type(msg.body) == "table" then
-                    saveAndReport(msg.body.content)
-                    if msg.body.action == "save_and_close" then
-                        hideWebview(true)
-                    end
+-- Created at init (deferred) so the first open doesn't pay for WebKit startup
+local function createWebview()
+    if webview then return end
+    -- Create user content controller for JS -> Lua messages
+    local usercontent = hs.webview.usercontent.new("scratchpad")
+        :setCallback(function(msg)
+            if type(msg.body) == "table" then
+                saveAndReport(msg.body.content)
+                if msg.body.action == "save_and_close" then
+                    hideWebview(true)
                 end
-            end)
+            end
+        end)
 
-        -- Clicking elsewhere saves and hides, like Spotlight
-        webview = panel.new(WIDTH, HEIGHT, usercontent, function() saveAndHide(false) end)
-    end
+    -- Clicking elsewhere saves and hides, like Spotlight
+    webview = panel.new(WIDTH, HEIGHT, usercontent, function() saveAndHide(false) end)
+    -- Empty editor, never saved: only warms WebKit and the CodeMirror CDN cache
+    webview:html(buildHTML(""))
+end
+
+local function showWebview()
+    createWebview()
 
     -- Check for iCloud conflicts
     checkForConflicts()

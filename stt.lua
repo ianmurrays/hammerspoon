@@ -299,7 +299,8 @@ pushHistoryToJS = function()
     historyWebview:evaluateJavaScript(string.format("if (window.loadEntries) window.loadEntries('%s')", json))
 end
 
-showHistoryWebview = function()
+-- Created at init (deferred) so the first open doesn't pay for WebKit startup
+local function createHistoryWebview()
     if not historyWebview then
         local usercontent = hs.webview.usercontent.new("sttHistory")
             :setCallback(function(msg)
@@ -318,6 +319,10 @@ showHistoryWebview = function()
         historyWebview = panel.new(HISTORY_W, HISTORY_H, usercontent, function() hideHistoryWebview(false) end)
         historyWebview:html(htmlLoader.load("stt_history"))
     end
+end
+
+showHistoryWebview = function()
+    createHistoryWebview()
 
     historyWebview:evaluateJavaScript("if (window.resetUI) window.resetUI()")
     panel.show(historyWebview, HISTORY_W, HISTORY_H)
@@ -965,6 +970,7 @@ function M.init(cfg)
     eventTap:start()
 
     historyHotkey = hs.hotkey.bind(config.history_hotkey[1], config.history_hotkey[2], toggleHistoryWebview)
+    hs.timer.doAfter(2, createHistoryWebview)
 
     print("STT loaded (toggle: fn+Space, hold: fn+Shift, history: Ctrl+Alt+H)")
     return M
