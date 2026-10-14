@@ -147,7 +147,7 @@ stt.init({
 })
 
 -- Initialize Voice Mode (Claude Code talks back; driven by ~/.claude/skills/voice-mode)
-voiceMode.init()
+voiceMode.init({ stt = stt })
 
 -- Initialize Clipboard History (Ctrl+Alt+V to show)
 clipboardHistory.init({})

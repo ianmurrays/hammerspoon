@@ -25,6 +25,8 @@
 --   vocabulary_hotkey = table    (default: {{"ctrl", "alt"}, "w"})
 --   on_record_start   = function (default: nil) called when a recording starts; may return a
 --                                  function that receives the transcript instead of pasting it
+--   auto_stop_seconds = number   (default: 3) M.listen(): send after this long with no new words
+--   auto_stop_no_speech = number (default: 10) M.listen(): discard if no words come in this long
 
 local M = {}
 local htmlLoader = require("html_loader")
@@ -56,6 +58,8 @@ local config = {
     history_hotkey = {{"ctrl", "alt"}, "h"},
     vocabulary_hotkey = {{"ctrl", "alt"}, "w"},
     on_record_start = nil,
+    auto_stop_seconds = 3,
+    auto_stop_no_speech = 10,
 }
 
 -- History
@@ -96,6 +100,9 @@ local llmTimer = nil
 local daemonTask = nil
 local generation = 0
 local deliver = nil    -- this recording's transcript destination from on_record_start (nil = paste)
+local idlePill = nil   -- pill state shown while idle (set by voice_mode), nil = no pill
+-- M.listen() recording: started/lastChange (s), heard (any words yet), text (last partial), timer
+local autoStop = nil
 local tones = {}
 local mediaWasPlaying = false
 local levelBuf = {}
@@ -116,7 +123,7 @@ local vocabularyHotkey = nil
 local vocabularyVisible = false
 
 -- Forward declarations
-local showPill, updatePill, hideOverlay, renderPill, showPasted
+local showPill, updatePill, hideOverlay, deleteOverlay, renderPill, showPasted
 local connectAndStart, retryConnect, sendCommand, handleMessage
 local pasteText, deliverText, cleanup, startDaemon, stopDaemon, resetIdleTimer, postProcessText, drawWaveform
 local appendHistory, cleanupWav, livePolish, renderTranscript
@@ -543,6 +550,7 @@ cleanup = function()
     print("stt: cleanup()")
     -- A recording that ends without a transcript tells its destination it was discarded
     if deliver then local d = deliver; deliver = nil; d(nil) end
+    if autoStop then autoStop.timer:stop(); autoStop = nil end
     if sock then pcall(function() sock:disconnect() end); sock = nil end
     if connectTimer then connectTimer:stop(); connectTimer = nil end
     if stopTimeout then stopTimeout:stop(); stopTimeout = nil end
@@ -627,6 +635,11 @@ handleMessage = function(data)
             if #words > 0 then
                 -- 30 words overfill the fixed-width text area, whose truncateHead clips the start with "…"
                 pill.live = table.concat(words, " ", math.max(1, #words - 29))
+                if autoStop and msg.text ~= autoStop.text then
+                    autoStop.text, autoStop.heard = msg.text, true
+                    autoStop.lastChange = hs.timer.secondsSinceEpoch()
+                    pill.countdown = nil
+                end
                 renderPill()
                 live.raw = msg.text:match("^%s*(.-)%s*$") -- trimmed like apple-stt's final text
                 livePolish()
@@ -699,12 +712,13 @@ local function spinnerPart(color, track)
     end}
 end
 
-local function dotPart()
+local function dotPart(hex)
+    hex = hex or "#FF453A"
     return {w = 8, draw = function(x, els)
         local c = {x = x + 4, y = PILL_MID}
         els[#els + 1] = {type = "circle", center = c, radius = 5.5, action = "fill",
-                         fillColor = {hex = "#FF453A", alpha = 0.25}}
-        els[#els + 1] = {type = "circle", center = c, radius = 4, action = "fill", fillColor = RED}
+                         fillColor = {hex = hex, alpha = 0.25}}
+        els[#els + 1] = {type = "circle", center = c, radius = 4, action = "fill", fillColor = {hex = hex}}
     end}
 end
 
@@ -731,12 +745,20 @@ local function badgePart(label)
     end}
 end
 
--- Stop (square) while recording, cancel (×) otherwise
-local function buttonPart(stop)
+-- Stop (square) while recording, cancel (×) otherwise. countdown (seconds left before
+-- an auto-stop) replaces the square with the number and a ring.
+local function buttonPart(stop, countdown)
     return {w = 24, draw = function(x, els)
         els[#els + 1] = {type = "circle", center = {x = x + 12, y = PILL_MID}, radius = 12, action = "fill",
                          fillColor = {white = 1, alpha = stop and 0.1 or 0.08}}
-        if stop then
+        if countdown then
+            els[#els + 1] = {type = "arc", center = {x = x + 12, y = PILL_MID}, radius = 11, arcRadii = false,
+                             action = "stroke", strokeWidth = 2, strokeColor = RED, startAngle = 0,
+                             endAngle = 360 * countdown / config.auto_stop_seconds}
+            local st = hs.styledtext.new(tostring(countdown), {font = {name = ".AppleSystemUIFont", size = 12},
+                                         color = WHITE, paragraphStyle = {alignment = "center"}})
+            els[#els + 1] = {type = "text", text = st, frame = {x = x, y = PILL_MID - 8, w = 24, h = 16}}
+        elseif stop then
             els[#els + 1] = {type = "rectangle", action = "fill", fillColor = WHITE,
                              roundedRectRadii = {xRadius = 2, yRadius = 2},
                              frame = {x = x + 8, y = PILL_MID - 4, w = 8, h = 8}}
@@ -801,7 +823,7 @@ renderPill = function()
             add(wavePart(20))
             add(textPart(styled(fmtElapsed(elapsed), 12, DIM, true)))
         end
-        add(buttonPart(true))
+        add(buttonPart(true, pill.countdown))
     elseif st == "transcribing" then
         add(spinnerPart({white = 1, alpha = 0.85}, {white = 1, alpha = 0.18}))
         add(textPart(styled("Transcribing", 13, WHITE)))
@@ -813,6 +835,20 @@ renderPill = function()
         add(textPart(styled("Polishing", 13, PURPLE_TEXT)))
         add(textPart(styled((config.llm_model:gsub("%-latest$", "")), 12, DIMMER)))
         add(buttonPart(false))
+    elseif st == "voice-idle" then
+        padR = 16
+        add(dotPart("#8E8E93"))
+        add(textPart(styled("Your turn", 13, WHITE)))
+        add(textPart(styled("fn Space", 12, DIMMER)))
+    elseif st == "voice-thinking" then
+        padR = 16
+        add(spinnerPart({white = 1, alpha = 0.85}, {white = 1, alpha = 0.18}))
+        add(textPart(styled("Thinking", 13, WHITE)))
+    elseif st == "voice-speaking" then
+        padR = 16
+        add(dotPart("#0A84FF"))
+        add(textPart(styled("Speaking", 13, WHITE)))
+        add(textPart(styled("fn Space to cut in", 12, DIMMER)))
     elseif st == "done" then
         padL, padR, gap = 12, 16, 8
         add(checkPart())
@@ -908,7 +944,7 @@ local function stopPillTimers()
 end
 
 showPill = function(pillState)
-    hideOverlay()
+    deleteOverlay()
     pill = {state = pillState, spin = 0, elapsed = 0, words = 0, screen = hs.screen.mainScreen()}
     canvas = hs.canvas.new({x = 0, y = 0, w = 1, h = 1})
     canvas:level(hs.canvas.windowLevels.overlay)
@@ -957,7 +993,8 @@ updatePill = function(pillState)
     pill.state = pillState
     renderPill()
 
-    if pillState == "starting" or pillState == "transcribing" or pillState == "polishing" then
+    if pillState == "starting" or pillState == "transcribing" or pillState == "polishing"
+       or pillState == "voice-thinking" then
         animTimer = hs.timer.doEvery(0.08, function()
             if not canvas or not pillIdx.spinner then return end
             pill.spin = (pill.spin + 30) % 360
@@ -977,11 +1014,17 @@ showPasted = function(text)
     doneTimer = hs.timer.doAfter(0.8, hideOverlay)
 end
 
-hideOverlay = function()
+deleteOverlay = function()
     stopPillTimers()
     if canvas then canvas:delete(); canvas = nil end
     if transcriptCanvas then transcriptCanvas:delete(); transcriptCanvas = nil end
     pillIdx = {}
+end
+
+-- Back to the idle pill (voice mode), or no pill
+hideOverlay = function()
+    deleteOverlay()
+    if idlePill then showPill(idlePill) end
 end
 
 -- ── Connection ────────────────────────────────────────────────────
@@ -1075,6 +1118,63 @@ end
 -- ── Public API ────────────────────────────────────────────────────
 
 M.toggle = toggleRecording
+
+-- Start a recording that sends itself once no new words arrive for auto_stop_seconds
+-- (counting down on the pill), or is discarded if no words come in auto_stop_no_speech.
+-- Needs the live words of the apple backend. Returns false when it can't start.
+function M.listen()
+    if state ~= "idle" or config.backend ~= "apple" then return false end
+    connectAndStart()
+    local a = {heard = false, text = nil}
+    a.started = hs.timer.secondsSinceEpoch()
+    a.lastChange = a.started
+    a.timer = hs.timer.doEvery(0.2, function()
+        local now = hs.timer.secondsSinceEpoch()
+        if state == "starting" then a.started, a.lastChange = now, now; return end
+        if state ~= "recording" or autoStop ~= a then a.timer:stop(); return end
+        if not a.heard then
+            if now - a.started > config.auto_stop_no_speech then
+                print("stt: listen: no speech, discarding")
+                resumeMedia()
+                hideOverlay()
+                cleanup()
+                resetIdleTimer()
+            end
+            return
+        end
+        local remaining = config.auto_stop_seconds - (now - a.lastChange)
+        local countdown = nil
+        if remaining <= 0 then
+            pill.countdown = nil
+            a.timer:stop()
+            sendCommand("stop")
+            return
+        elseif now - a.lastChange >= 0.5 then
+            countdown = math.ceil(remaining)
+        end
+        if countdown ~= pill.countdown then
+            pill.countdown = countdown
+            renderPill()
+        end
+    end)
+    autoStop = a
+    return true
+end
+
+-- Pill state to keep on screen while idle ("voice-idle", "voice-thinking", "voice-speaking"),
+-- or nil for none. A recording or its "Pasted" pill takes over until it ends.
+function M.setIdlePill(pillState)
+    if idlePill == pillState then return end
+    idlePill = pillState
+    if state ~= "idle" or doneTimer then return end
+    if not pillState then
+        deleteOverlay()
+    elseif canvas and pill.state and pill.state:match("^voice%-") then
+        updatePill(pillState)
+    else
+        showPill(pillState)
+    end
+end
 
 function M.init(cfg)
     cfg = cfg or {}
@@ -1189,6 +1289,7 @@ end
 M.toggleVocabulary = toggleVocabularyWebview
 
 function M.stop()
+    idlePill = nil
     if state ~= "idle" then sendCommand("stop") end
     hideOverlay()
     cleanup()

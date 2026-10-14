@@ -7,6 +7,8 @@
 --   voice-batch?msg=<id>&i=<n>&final=<0|1>&text=  a MessageDisplay batch to speak
 --   voice-turn?state=busy|idle                   UserPromptSubmit / Stop, StopFailure
 -- The hook ignores every session except the one in OWNER_FILE.
+-- While on, the stt pill stays on screen (your turn / thinking / speaking). With auto_listen,
+-- dictation starts by itself once Claude's turn has ended and it has finished speaking.
 
 local M = {}
 local toast = require("toast")
@@ -21,12 +23,43 @@ local muted = false     -- set by barge-in; drops speech until the next prompt i
 local synth = nil
 local queue = {}
 local msgs = {}         -- message_id -> {next = index, pending = {}, fence = bool}
+local stt = nil
+local autoListen = true
+local listenTimer = nil
+local LISTEN_GRACE = 1  -- s after the turn ends and speech stops, for MessageDisplay batches still in flight
+
+-- ── Pill and auto-listen ──────────────────────────────────────────
+
+local function speaking()
+    return synth:isSpeaking() or (#queue > 0 and not muted)
+end
+
+local function updatePill()
+    if not active then return stt.setIdlePill(nil) end
+    stt.setIdlePill(speaking() and "voice-speaking" or busy and "voice-thinking" or "voice-idle")
+end
+
+-- Claude's turn is over and it is quiet: start listening, after a grace period for late batches
+local function maybeListen()
+    if listenTimer then listenTimer:stop(); listenTimer = nil end
+    if not active or not autoListen or busy or muted or speaking() then return end
+    local token = activation
+    listenTimer = hs.timer.doAfter(LISTEN_GRACE, function()
+        listenTimer = nil
+        if token == activation and not busy and not muted and not speaking() then stt.listen() end
+    end)
+end
 
 -- ── Speech ────────────────────────────────────────────────────────
 
 local function speakNext()
-    if muted or synth:isSpeaking() or #queue == 0 then return end
+    if muted or synth:isSpeaking() or #queue == 0 then
+        updatePill()
+        if not synth:isSpeaking() then maybeListen() end
+        return
+    end
     synth:speak(table.remove(queue, 1))
+    updatePill()
 end
 
 local function say(text)
@@ -37,6 +70,7 @@ end
 local function silence()
     queue = {}
     msgs = {}
+    if listenTimer then listenTimer:stop(); listenTimer = nil end
     synth:stop()
 end
 
@@ -132,6 +166,8 @@ local function submit(text, token)
             hs.timer.doAfter(0.2, function()
                 if token ~= activation or not isFocused() then return failSubmit(text, "Focus moved") end
                 hs.eventtap.keyStroke({}, "return")
+                busy = true
+                updatePill()
                 if prev and prev:id() ~= owner.winId then
                     hs.timer.doAfter(0.1, function() prev:focus() end)
                 end
@@ -151,7 +187,7 @@ function M.claimRecording()
     local token = activation
     return function(text)
         if text then return submit(text, token) end
-        if token == activation then muted = false end
+        if token == activation then muted = false; updatePill() end
     end
 end
 
@@ -168,7 +204,8 @@ function M.on(session, pid)
     f:write(session)
     f:close()
     activation = activation + 1
-    active, busy, muted = true, false, false
+    -- The skill turns voice mode on inside a turn; its Stop marks the end
+    active, busy, muted = true, true, false
     owner = {session = session, pid = pid, winId = win:id()}
     silence()
     toast.show({icon = "🎙", title = "Voice mode on", detail = win:title(), tint = "blue"})
@@ -181,13 +218,17 @@ function M.off()
     activation = activation + 1
     active, owner, busy, muted = false, nil, false, false
     silence()
+    updatePill()
     toast.show({icon = "🎙", title = "Voice mode off"})
     say("Voice mode off.")
 end
 
 function M.isActive() return active end
 
-function M.init()
+-- cfg.stt: the stt module (required). cfg.auto_listen: default true.
+function M.init(cfg)
+    stt = cfg.stt
+    if cfg.auto_listen ~= nil then autoListen = cfg.auto_listen end
     -- A reload loses the saved window and speech state, so a leftover owner file is stale
     os.remove(OWNER_FILE)
     synth = hs.speech.new()
@@ -210,6 +251,8 @@ function M.init()
         busy = params.state == "busy"
         -- A new prompt ends a barge-in: speak this turn's reply
         if busy then muted = false; msgs = {} end
+        updatePill()
+        maybeListen()
     end)
 
     local prevShutdown = hs.shutdownCallback

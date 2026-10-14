@@ -260,6 +260,8 @@ Ask Claude Code for "voice mode" (or run `/voice-mode`). The skill runs `open -g
 - fn+Space and fn+Shift send the transcript to that window (focus, paste, Return, focus back), from any app. If the window has several tabs or panes, the text goes to the active one.
 - Claude's replies are spoken line by line as they appear. Code blocks, table rows, and URLs are skipped.
 - Starting a recording stops the speech. If Claude is still working when you send, Hammerspoon presses Esc first to cancel that turn.
+- The pill stays on screen: "Your turn", "Thinking", or "Speaking".
+- Auto-listen: when Claude's turn has ended and it has finished speaking, dictation starts by itself. Once you stop talking, the stop button counts down 3‑2‑1 and then sends; new words reset the countdown. If you say nothing for 10 seconds, it stops listening and waits for fn+Space. There is no way to cancel an auto-started recording without sending it, so anything said near the mic within those 3 seconds goes to Claude. This needs the Apple backend's live words. Set `auto_listen = false` in `voiceMode.init` to turn it off, and `auto_stop_seconds` / `auto_stop_no_speech` in `stt.init` to change the timings.
 - Say "stop voice mode" to end it. It also ends when the Claude Code session exits, and on a Hammerspoon reload.
 
 Parts outside this repo:
