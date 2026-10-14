@@ -336,6 +336,7 @@ function M.init(cfg)
 
     -- Hotkey
     hotkey = hs.hotkey.bind(config.hotkey[1], config.hotkey[2], toggleWebview)
+    hs.timer.doAfter(2, createWebview)
 
     print("Scratchpad loaded (Ctrl+Option+S to toggle)")
     return M
