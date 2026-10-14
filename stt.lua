@@ -601,6 +601,8 @@ handleMessage = function(data)
         elseif config.llm_api_key and #config.llm_api_key > 0 and msg.text and #msg.text > 0 then
             state = "polishing"
             updatePill("polishing")
+            -- The live panel lags the final transcript, so drop it rather than show stale text
+            if transcriptCanvas then transcriptCanvas:delete(); transcriptCanvas = nil end
             local gen = generation
             local rawText = msg.text
             postProcessText(msg.text, function(text)
