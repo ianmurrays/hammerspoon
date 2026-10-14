@@ -427,6 +427,9 @@ local function createVocabularyWebview()
             if type(msg.body) ~= "table" then return end
             if msg.body.action == "save" then
                 saveVocabulary(msg.body.text or "")
+            elseif msg.body.action == "ready" then
+                -- First open: the page loads after toggleVocabularyWebview's setText call, so it asks
+                vocabularyWebview:evaluateJavaScript("window.setText(" .. hs.json.encode({loadVocabulary()}):sub(2, -2) .. ")")
             elseif msg.body.action == "close" then
                 hideVocabularyWebview(true)
             end

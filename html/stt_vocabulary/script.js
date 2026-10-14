@@ -20,6 +20,9 @@ terms.addEventListener('input', () => {
   saveTimer = setTimeout(save, 400);
 });
 
+// The panel hides on blur too, so flush a pending save
+window.addEventListener('blur', () => { if (saveTimer) save(); });
+
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     e.preventDefault();
@@ -27,3 +30,5 @@ document.addEventListener('keydown', (e) => {
     post({ action: 'close' });
   }
 });
+
+post({ action: 'ready' });
