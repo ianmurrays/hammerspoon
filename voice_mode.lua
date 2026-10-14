@@ -1,8 +1,11 @@
 -- Voice mode for Claude Code
 -- Speaks Claude's replies with hs.speech and sends push-to-talk transcripts (from stt) to
--- the Claude Code window. Driven by the voice-mode skill and the hook in
--- ~/.claude/hooks/voice-mode.py, through hammerspoon:// URL events:
---   voice-mode?state=on&session=<id>&pid=<pid>   saves the frontmost window, claims the session
+-- Claude's terminal (iTerm or Orca, without moving focus) or window. Driven by the
+-- voice-mode skill and the hook in ~/.claude/hooks/voice-mode.py, through hammerspoon://
+-- URL events:
+--   voice-mode?state=on&session=<id>&pid=<pid>&iterm=<id>&orca=<handle>
+--                                                claims the session; saves the terminal target
+--                                                (iterm/orca, either optional) and the frontmost window
 --   voice-mode?state=off&session=<id>            only the owner session can turn it off
 --   voice-batch?msg=<id>&i=<n>&final=<0|1>&text=  a MessageDisplay batch to speak
 --   voice-turn?state=busy|idle                   UserPromptSubmit / Stop, StopFailure
@@ -115,6 +118,44 @@ local function onBatch(params)
 end
 
 -- ── Submitting a transcript ───────────────────────────────────────
+-- With a terminal target (iTerm session or Orca terminal, passed by the skill) the
+-- transcript is written straight into Claude's terminal and focus never moves. Without
+-- one, Claude's window is focused and the transcript pasted. A failed send to a target
+-- never falls back to the window: it is the window, not the tab, and may hold another session.
+
+-- argv: session uuid, "esc" or "text", text. Prints "ok" or "missing".
+local ITERM_SCRIPT = [[
+on run argv
+	if application "iTerm2" is not running then return "missing"
+	set E to character id 27
+	tell application "iTerm2"
+		repeat with w in windows
+			repeat with t in tabs of w
+				set m to (sessions of t whose id is (item 1 of argv))
+				if m is not {} then
+					tell item 1 of m
+						if item 2 of argv is "esc" then
+							write text E newline NO
+						else
+							write text (E & "[200~" & (item 3 of argv) & E & "[201~") newline NO
+							delay 0.05
+							write text (character id 13) newline NO
+						end if
+					end tell
+					return "ok"
+				end if
+			end repeat
+		end repeat
+	end tell
+	return "missing"
+end run]]
+local ESC_GAP = 0.4     -- s between Esc and the transcript, so Claude has cancelled its turn
+local TURN_TIMEOUT = 1.5  -- s for UserPromptSubmit to arrive after a send
+
+local outbox = {}       -- transcripts waiting to be sent, one send at a time
+local sending = false
+local prompts = 0       -- voice-turn busy events seen; the watchdog compares it
+local orcaBin = nil
 
 local function ownerAlive()
     local _, ok = hs.execute("/bin/kill -0 " .. owner.pid .. " 2>/dev/null")
@@ -134,44 +175,132 @@ local function whenFocused(fn, tries)
     hs.timer.doAfter(0.05, function() whenFocused(fn, tries - 1) end)
 end
 
-local function failSubmit(text, why)
+-- Copies the transcript and, if voice mode is still on for this recording, unmutes it
+local function failSubmit(text, why, token)
     hs.pasteboard.setContents(text)
     toast.show({icon = "!", title = "Not sent to Claude", detail = why .. ". Transcript copied.", tint = "red"})
+    if token == activation and active then
+        muted = false
+        updatePill()
+        maybeListen()
+    end
+end
+
+-- Runs a command without blocking, killed after 10 s. done(ok, stdout)
+local function run(path, args, done)
+    local task
+    local timer = hs.timer.doAfter(10, function() task:terminate() end)
+    task = hs.task.new(path, function(code, out)
+        timer:stop()
+        done(code == 0, out or "")
+    end, args)
+    if not task:start() then timer:stop(); done(false, "") end
+end
+
+-- Control characters other than newline and tab would reach the terminal as keys
+local function clean(text)
+    return (text:gsub("[%z\1-\8\11-\31\127]", ""))
+end
+
+-- payload: the transcript, or nil for Esc. done(ok, why)
+local function sendITerm(uuid, payload, done)
+    local args = {"-e", ITERM_SCRIPT, uuid, payload and "text" or "esc", payload and payload:gsub("\n", "\r") or ""}
+    run("/usr/bin/osascript", args, function(ok, out)
+        if ok and out:match("^ok") then return done(true) end
+        done(false, ok and "Claude's iTerm session is gone" or "Couldn't reach iTerm")
+    end)
+end
+
+local function sendOrca(handle, payload, done)
+    if orcaBin == nil then
+        orcaBin = false
+        for _, path in ipairs({"/opt/homebrew/bin/orca", "/usr/local/bin/orca"}) do
+            if hs.fs.attributes(path) then orcaBin = path; break end
+        end
+    end
+    if not orcaBin then return done(false, "The orca CLI isn't installed") end
+    -- Not --interrupt: it sends Ctrl+C, and a second one exits Claude
+    local args = {"terminal", "send", "--terminal", handle, "--text", payload or "\27"}
+    if payload then table.insert(args, "--enter") end
+    run(orcaBin, args, function(ok) done(ok, "Couldn't reach Claude's Orca terminal") end)
 end
 
 -- Focus Claude's window, cancel its turn if it is working, paste, press Return, and give
 -- focus back. Each step checks that Claude's window still has focus, so keystrokes never
 -- land in another app.
-local function submit(text, token)
-    if token ~= activation or not active then return failSubmit(text, "Voice mode changed") end
-    if not ownerAlive() then
-        M.off()
-        return failSubmit(text, "The Claude session has ended")
-    end
-    local win = hs.window.get(owner.winId)
-    if not win then return failSubmit(text, "Claude's window is gone") end
+local function sendFocused(text, token, done)
+    local win = owner.winId and hs.window.get(owner.winId)
+    if not win then return done(false, "Claude's window is gone") end
     local prev = hs.window.focusedWindow()
     win:focus()
     whenFocused(function(ok)
-        if not ok then return failSubmit(text, "Couldn't focus Claude's window") end
+        if not ok then return done(false, "Couldn't focus Claude's window") end
         local wasBusy = busy
         if wasBusy then
             hs.eventtap.keyStroke({}, "escape")
             busy = false
         end
-        hs.timer.doAfter(wasBusy and 0.4 or 0, function()
-            if token ~= activation or not isFocused() then return failSubmit(text, "Focus moved") end
+        hs.timer.doAfter(wasBusy and ESC_GAP or 0, function()
+            if token ~= activation or not isFocused() then return done(false, "Focus moved") end
             hs.pasteboard.setContents(text)
             hs.eventtap.keyStroke({"cmd"}, "v")
             hs.timer.doAfter(0.2, function()
-                if token ~= activation or not isFocused() then return failSubmit(text, "Focus moved") end
+                if token ~= activation or not isFocused() then return done(false, "Focus moved") end
                 hs.eventtap.keyStroke({}, "return")
-                busy = true
-                updatePill()
                 if prev and prev:id() ~= owner.winId then
                     hs.timer.doAfter(0.1, function() prev:focus() end)
                 end
+                done(true)
             end)
+        end)
+    end)
+end
+
+local sendNext
+
+local function submit(text, token)
+    table.insert(outbox, {text = text, token = token})
+    if not sending then sendNext() end
+end
+
+sendNext = function()
+    local item = table.remove(outbox, 1)
+    sending = item ~= nil
+    if not item then return end
+    local text, token, seen = item.text, item.token, prompts
+    local live = function() return token == activation and active end
+    local function finish(ok, why)
+        if not ok then
+            failSubmit(text, why, token)
+        elseif live() then
+            busy = true
+            updatePill()
+            -- A write that landed in a dialog or a dead shell starts no turn
+            hs.timer.doAfter(TURN_TIMEOUT, function()
+                if live() and prompts == seen then
+                    busy = false
+                    failSubmit(text, "Claude didn't start a turn", token)
+                end
+            end)
+        end
+        sendNext()
+    end
+    if not live() then return finish(false, "Voice mode changed") end
+    if not ownerAlive() then
+        M.off()
+        return finish(false, "The Claude session has ended")
+    end
+    local o = owner
+    local send = o.orca and function(p, cb) sendOrca(o.orca, p, cb) end
+        or o.iterm and function(p, cb) sendITerm(o.iterm, p, cb) end
+    if not send then return sendFocused(text, token, finish) end
+    if not busy then return send(clean(text), finish) end
+    send(nil, function(ok, why)
+        if not ok then return finish(false, why) end
+        busy = false
+        hs.timer.doAfter(ESC_GAP, function()
+            if not live() then return finish(false, "Voice mode changed") end
+            send(clean(text), finish)
         end)
     end)
 end
@@ -193,9 +322,13 @@ end
 
 -- ── On / off ──────────────────────────────────────────────────────
 
-function M.on(session, pid)
+-- iterm: $ITERM_SESSION_ID (w0t1p0:<uuid>), orca: $ORCA_TERMINAL_HANDLE. Either one lets
+-- transcripts go straight to the terminal; without them the frontmost window is used.
+function M.on(session, pid, iterm, orca)
+    iterm = iterm and iterm:match("^w%d+t%d+p%d+:([%x%-]+)$")
+    orca = orca and orca:match("^term_[%w%-]+$")
     local win = hs.window.focusedWindow()
-    if not session or session == "" or not pid or not win then
+    if not session or session == "" or not pid or not (win or iterm or orca) then
         toast.show({icon = "!", title = "Voice mode", detail = "Missing session, pid, or window", tint = "red"})
         return
     end
@@ -206,9 +339,9 @@ function M.on(session, pid)
     activation = activation + 1
     -- The skill turns voice mode on inside a turn; its Stop marks the end
     active, busy, muted = true, true, false
-    owner = {session = session, pid = pid, winId = win:id()}
+    owner = {session = session, pid = pid, winId = win and win:id(), iterm = iterm, orca = orca}
     silence()
-    toast.show({icon = "🎙", title = "Voice mode on", detail = win:title(), tint = "blue"})
+    toast.show({icon = "🎙", title = "Voice mode on", detail = orca and "Orca terminal" or iterm and "iTerm session" or win:title(), tint = "blue"})
     say("Voice mode on.")
 end
 
@@ -240,7 +373,7 @@ function M.init(cfg)
 
     hs.urlevent.bind("voice-mode", function(_, params)
         if params.state == "on" then
-            M.on(params.session, tonumber(params.pid))
+            M.on(params.session, tonumber(params.pid), params.iterm, params.orca)
         elseif params.state == "off" and active and params.session == owner.session then
             M.off()
         end
@@ -249,6 +382,7 @@ function M.init(cfg)
     hs.urlevent.bind("voice-turn", function(_, params)
         if not active then return end
         busy = params.state == "busy"
+        if busy then prompts = prompts + 1 end
         -- A new prompt ends a barge-in: speak this turn's reply
         if busy then muted = false; msgs = {} end
         updatePill()
