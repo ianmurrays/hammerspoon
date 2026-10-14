@@ -23,6 +23,8 @@
 --   media_ctl         = string   (default: "/opt/homebrew/bin/media-control")
 --   history_hotkey    = table    (default: {{"ctrl", "alt"}, "h"})
 --   vocabulary_hotkey = table    (default: {{"ctrl", "alt"}, "w"})
+--   on_record_start   = function (default: nil) called when a recording starts; may return a
+--                                  function that receives the transcript instead of pasting it
 
 local M = {}
 local htmlLoader = require("html_loader")
@@ -53,6 +55,7 @@ local config = {
     -- History viewer
     history_hotkey = {{"ctrl", "alt"}, "h"},
     vocabulary_hotkey = {{"ctrl", "alt"}, "w"},
+    on_record_start = nil,
 }
 
 -- History
@@ -92,6 +95,7 @@ local idleTimer = nil
 local llmTimer = nil
 local daemonTask = nil
 local generation = 0
+local deliver = nil    -- this recording's transcript destination from on_record_start (nil = paste)
 local tones = {}
 local mediaWasPlaying = false
 local levelBuf = {}
@@ -114,7 +118,7 @@ local vocabularyVisible = false
 -- Forward declarations
 local showPill, updatePill, hideOverlay, renderPill, showPasted
 local connectAndStart, retryConnect, sendCommand, handleMessage
-local pasteText, cleanup, startDaemon, stopDaemon, resetIdleTimer, postProcessText, drawWaveform
+local pasteText, deliverText, cleanup, startDaemon, stopDaemon, resetIdleTimer, postProcessText, drawWaveform
 local appendHistory, cleanupWav, livePolish, renderTranscript
 local playTone, pauseMedia, resumeMedia
 local parseHistory, pushHistoryToJS, showHistoryWebview, hideHistoryWebview, toggleHistoryWebview
@@ -234,6 +238,13 @@ pasteText = function(text)
     else
         hs.eventtap.keyStrokes(text)
     end
+end
+
+deliverText = function(text)
+    local d = deliver
+    deliver = nil
+    if not text or #text == 0 then text = nil end
+    if d then d(text) else pasteText(text) end
 end
 
 appendHistory = function(rawText, polishedText)
@@ -530,6 +541,8 @@ end
 
 cleanup = function()
     print("stt: cleanup()")
+    -- A recording that ends without a transcript tells its destination it was discarded
+    if deliver then local d = deliver; deliver = nil; d(nil) end
     if sock then pcall(function() sock:disconnect() end); sock = nil end
     if connectTimer then connectTimer:stop(); connectTimer = nil end
     if stopTimeout then stopTimeout:stop(); stopTimeout = nil end
@@ -572,7 +585,7 @@ handleMessage = function(data)
             -- The live polish already covers the whole transcript: paste it without another round trip
             playTone("done")
             showPasted(live.polished)
-            pasteText(live.polished)
+            deliverText(live.polished)
             appendHistory(msg.text, live.polished)
             cleanupWav(wavPath)
             cleanup()
@@ -589,7 +602,7 @@ handleMessage = function(data)
                 end
                 playTone("done")
                 showPasted(text)
-                pasteText(text)
+                deliverText(text)
                 appendHistory(rawText, text)
                 cleanupWav(wavPath)
                 cleanup()
@@ -598,7 +611,7 @@ handleMessage = function(data)
         else
             playTone("done")
             showPasted(msg.text)
-            pasteText(msg.text)
+            deliverText(msg.text)
             appendHistory(msg.text, nil)
             cleanupWav(wavPath)
             cleanup()
@@ -1006,6 +1019,7 @@ end
 connectAndStart = function()
     print("stt: connectAndStart()")
     generation = generation + 1
+    deliver = config.on_record_start and config.on_record_start() or nil
 
     if idleTimer then idleTimer:stop(); idleTimer = nil end
     if sock then pcall(function() sock:disconnect() end); sock = nil end

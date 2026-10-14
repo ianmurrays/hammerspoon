@@ -20,6 +20,7 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | `eject_lock` | Locks the screen when the Magic Keyboard's Eject key is double-tapped; holding Eject for 4 seconds runs the "Eject TimeMachine Disk" macOS Shortcut (modifier combos like Cmd+Alt+Eject pass through untouched) | Double-tap Eject / Hold Eject 4s |
 | `whatcable` | Menubar view of USB-C/Thunderbolt port data (link speed, cable capabilities, charging, displays, connected device tree, cable trust warnings) via the [whatcable](https://github.com/darrylmorley/whatcable) CLI; refreshes on USB/power/display changes | — |
 | `keyboard_lock` | Locks the keyboard so you can clean it: a full-screen overlay plus an event tap that swallows keys, modifiers and media keys; a hold of Esc or the mouse button for 3 seconds unlocks | Ctrl+Alt+K |
+| `voice_mode` | Voice conversations with Claude Code: reads Claude's replies aloud with the default system voice and sends your push-to-talk dictation to the Claude Code window. Pressing fn+Space while it talks stops the speech, and cancels Claude's turn if it is still working. Turned on and off by the `voice-mode` Claude Code skill | fn+Space / fn+Shift (while on) |
 | `stall_log` | Writes keyboard delay data to `~/Library/Logs/hammerspoon-stall.log`: each time the Hammerspoon main thread blocks for more than 0.5 s (with the last 1000 characters of the console), and each key event that arrives more than 150 ms late | — |
 
 ## Hotkeys
@@ -251,6 +252,22 @@ stt.init({
 ```
 
 The API uses the OpenAI-compatible chat completions format, so other providers (OpenRouter, Groq, Together, etc.) work by changing `llm_api_url`, `llm_model`, and `llm_api_key`.
+
+#### Voice Mode (Claude Code)
+
+Ask Claude Code for "voice mode" (or run `/voice-mode`). The skill runs `open -g "hammerspoon://voice-mode?state=on&session=...&pid=..."`, and Hammerspoon saves the frontmost window as Claude's window. While voice mode is on:
+
+- fn+Space and fn+Shift send the transcript to that window (focus, paste, Return, focus back), from any app. If the window has several tabs or panes, the text goes to the active one.
+- Claude's replies are spoken line by line as they appear. Code blocks, table rows, and URLs are skipped.
+- Starting a recording stops the speech. If Claude is still working when you send, Hammerspoon presses Esc first to cancel that turn.
+- Say "stop voice mode" to end it. It also ends when the Claude Code session exits, and on a Hammerspoon reload.
+
+Parts outside this repo:
+
+- `~/.claude/skills/voice-mode/SKILL.md` — turns voice mode on and off, and tells Claude to talk in short sentences and ask one question at a time.
+- `~/.claude/hooks/voice-mode.py` — registered in `~/.claude/settings.json` on `MessageDisplay`, `UserPromptSubmit`, `Stop`, `StopFailure`, and `SessionEnd`. It forwards events from the session named in `~/.claude/voice-mode-session` to the `voice-batch`, `voice-turn`, and `voice-mode` URL events, and ignores every other session.
+
+For a natural voice, download a Premium voice (System Settings → Accessibility → Spoken Content → System Voice → Manage Voices) and select it as the system voice.
 
 #### Vocabulary
 

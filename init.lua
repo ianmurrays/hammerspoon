@@ -15,6 +15,7 @@ local ejectLock = require("eject_lock")
 local whatcable = require("whatcable")
 local keyboardLock = require("keyboard_lock")
 local stallLog = require("stall_log")
+local voiceMode = require("voice_mode")
 
 -- Read Slack token from macOS Keychain
 -- One-time setup: security add-generic-password -a "$USER" -s "slack-status-token" -w "xoxp-your-token-here"
@@ -141,7 +142,12 @@ stt.init({
 	llm_api_key = mistralApiKey,
 	backend = "apple",
 	locales = { "en-US", "es-CL" },
+	-- In voice mode, recordings go to Claude Code instead of the frontmost app
+	on_record_start = voiceMode.claimRecording,
 })
+
+-- Initialize Voice Mode (Claude Code talks back; driven by ~/.claude/skills/voice-mode)
+voiceMode.init()
 
 -- Initialize Clipboard History (Ctrl+Alt+V to show)
 clipboardHistory.init({})
