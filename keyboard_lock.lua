@@ -175,6 +175,8 @@ end
 
 -- Public API
 
+M.lock = lock
+
 function M.init(cfg)
   config = cfg or {}
   config.holdSeconds = config.holdSeconds or 3

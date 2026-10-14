@@ -169,6 +169,21 @@ unifiedMenu.init({
 	keyboardLock = keyboardLock,
 })
 
+-- URL actions for launchers (e.g. Tinycast custom command: open -g hammerspoon://scratchpad)
+for name, fn in pairs({
+	scratchpad = scratchpad.toggle,
+	gif = gifFinder.toggle,
+	clipboard = clipboardHistory.toggle,
+	blur = screenBlur.toggle,
+	stt = stt.toggle,
+	["stt-history"] = stt.showHistory,
+	["keyboard-lock"] = keyboardLock.lock,
+}) do
+	hs.urlevent.bind(name, function()
+		fn()
+	end)
+end
+
 -- Initialize Stall Log (writes keyboard delay data to ~/Library/Logs/hammerspoon-stall.log).
 -- Initialize it last, because the config load itself blocks the main thread.
 stallLog.init({})

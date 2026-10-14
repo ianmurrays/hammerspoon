@@ -330,6 +330,8 @@ end
 
 -- Public API
 
+M.toggle = toggleWebview
+
 function M.init(cfg)
     config.filePath = cfg.filePath or (os.getenv("HOME") .. "/Library/Mobile Documents/com~apple~CloudDocs/Scratchpad/scratchpad.txt")
     config.hotkey = cfg.hotkey or { {"ctrl", "alt"}, "s" }

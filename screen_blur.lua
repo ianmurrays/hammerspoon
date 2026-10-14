@@ -170,6 +170,8 @@ end
 
 -- Public API
 
+M.toggle = toggleBlur
+
 function M.init(cfg)
     config = cfg or {}
 

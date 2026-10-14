@@ -121,6 +121,20 @@ The mouse and the trackpad stay live on purpose, but a short click does nothing.
 
 macOS handles 3 inputs below the event tap, and the lock cannot block them: Caps Lock, the power button, and Touch ID. Trackpad gestures such as Mission Control are not keyboard events, and the lock does not block them either. A double-tap of the fn key can still start dictation; this is not verified.
 
+## URL Actions
+
+Launchers such as Tinycast can trigger actions with a custom shell command, for example `open -g hammerspoon://scratchpad`. The `-g` flag keeps Hammerspoon in the background.
+
+| URL | Action |
+|---|---|
+| `hammerspoon://scratchpad` | Toggle the scratchpad |
+| `hammerspoon://gif` | Toggle the GIF finder |
+| `hammerspoon://clipboard` | Toggle clipboard history |
+| `hammerspoon://blur` | Toggle the screen blur |
+| `hammerspoon://stt` | Start or stop dictation |
+| `hammerspoon://stt-history` | Show the STT history |
+| `hammerspoon://keyboard-lock` | Lock the keyboard |
+
 ## File Structure
 
 Webview modules (`gif_finder`, `slack_status`, `scratchpad`, `stt`, `clipboard_history`) store their HTML, CSS, and JS in separate files under `html/`:

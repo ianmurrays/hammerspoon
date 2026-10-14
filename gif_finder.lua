@@ -275,6 +275,8 @@ end
 
 -- Public API
 
+M.toggle = toggleWebview
+
 function M.init(cfg)
     config.apiKey = cfg.apiKey
     config.hotkey = cfg.hotkey or { {"ctrl", "alt"}, "g" }

@@ -318,6 +318,8 @@ end
 
 -- Public API
 
+M.toggle = toggleWebview
+
 function M.init(cfg)
     cfg = cfg or {}
     for k, v in pairs(cfg) do config[k] = v end
