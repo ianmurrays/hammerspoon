@@ -133,6 +133,7 @@ Launchers such as Tinycast can trigger actions with a custom shell command, for 
 | `hammerspoon://blur` | Toggle the screen blur |
 | `hammerspoon://stt` | Start or stop dictation |
 | `hammerspoon://stt-history` | Show the STT history |
+| `hammerspoon://stt-vocabulary` | Toggle the STT vocabulary editor |
 | `hammerspoon://keyboard-lock` | Lock the keyboard |
 
 ## File Structure

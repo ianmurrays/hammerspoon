@@ -177,6 +177,7 @@ for name, fn in pairs({
 	blur = screenBlur.toggle,
 	stt = stt.toggle,
 	["stt-history"] = stt.showHistory,
+	["stt-vocabulary"] = stt.toggleVocabulary,
 	["keyboard-lock"] = keyboardLock.lock,
 }) do
 	hs.urlevent.bind(name, function()
