@@ -3,6 +3,7 @@
 -- Daemon is started on demand and stopped after idle timeout.
 -- Toggle recording with fn+Space, hold-to-talk with fn+Shift.
 -- History viewer: Ctrl+Alt+H (configurable via history_hotkey)
+-- Vocabulary editor: Ctrl+Alt+W (configurable via vocabulary_hotkey)
 --
 -- Config options (passed via init(cfg)):
 --   host              = string   (default: "127.0.0.1")
@@ -21,6 +22,7 @@
 --   pause_media       = boolean  (default: true, pause media during recording)
 --   media_ctl         = string   (default: "/opt/homebrew/bin/media-control")
 --   history_hotkey    = table    (default: {{"ctrl", "alt"}, "h"})
+--   vocabulary_hotkey = table    (default: {{"ctrl", "alt"}, "w"})
 
 local M = {}
 local htmlLoader = require("html_loader")
@@ -50,12 +52,16 @@ local config = {
     media_ctl = "/opt/homebrew/bin/media-control",
     -- History viewer
     history_hotkey = {{"ctrl", "alt"}, "h"},
+    vocabulary_hotkey = {{"ctrl", "alt"}, "w"},
 }
 
 -- History
 local HISTORY_DIR = os.getenv("HOME") .. "/Library/Mobile Documents/com~apple~CloudDocs/STT"
 local HISTORY_FILE = HISTORY_DIR .. "/history.txt"
 local HISTORY_W, HISTORY_H = 680, 500
+-- Vocabulary: terms the transcriber and the LLM should expect, one per line
+local VOCABULARY_FILE = HISTORY_DIR .. "/vocabulary.txt"
+local VOCABULARY_W, VOCABULARY_H = 480, 420
 
 -- Overlay
 local PILL_HEIGHT = 40
@@ -99,6 +105,12 @@ local historyWebview = nil
 local historyHotkey = nil
 local historyVisible = false
 
+-- Vocabulary state
+local vocabulary = {}
+local vocabularyWebview = nil
+local vocabularyHotkey = nil
+local vocabularyVisible = false
+
 -- Forward declarations
 local showPill, updatePill, hideOverlay, renderPill, showPasted
 local connectAndStart, retryConnect, sendCommand, handleMessage
@@ -106,6 +118,7 @@ local pasteText, cleanup, startDaemon, stopDaemon, resetIdleTimer, postProcessTe
 local appendHistory, cleanupWav, livePolish, renderTranscript
 local playTone, pauseMedia, resumeMedia
 local parseHistory, pushHistoryToJS, showHistoryWebview, hideHistoryWebview, toggleHistoryWebview
+local loadVocabulary
 
 -- ── Daemon lifecycle ──────────────────────────────────────────────
 
@@ -190,7 +203,10 @@ sendCommand = function(cmd)
     print("stt: sendCommand('" .. cmd .. "') connected=" .. tostring(connected))
     if connected then
         local locale = config.locales[localeIndex]
-        if cmd == "start" then sessionLocale = locale end
+        if cmd == "start" then
+            sessionLocale = locale
+            loadVocabulary()
+        end
         sock:write(hs.json.encode({cmd = cmd, locale = locale}) .. "\n")
     end
 
@@ -351,6 +367,67 @@ toggleHistoryWebview = function()
     end
 end
 
+-- ── Vocabulary ──────────────────────────────────────────────────
+
+-- Reads VOCABULARY_FILE into `vocabulary` and returns its raw text.
+-- Read again at each recording start, so an edit synced from iCloud applies too.
+loadVocabulary = function()
+    local f = io.open(VOCABULARY_FILE, "r")
+    local text = f and f:read("*a") or ""
+    if f then f:close() end
+    vocabulary = {}
+    for line in text:gmatch("[^\n]+") do
+        local term = line:match("^%s*(.-)%s*$")
+        if #term > 0 then table.insert(vocabulary, term) end
+    end
+    return text
+end
+
+local function saveVocabulary(text)
+    hs.fs.mkdir(HISTORY_DIR)
+    local f = io.open(VOCABULARY_FILE, "w")
+    if not f then
+        print("stt: failed to open vocabulary file for writing")
+        return
+    end
+    f:write(text)
+    f:close()
+    loadVocabulary()
+end
+
+local function hideVocabularyWebview(restoreFocus)
+    if vocabularyWebview and vocabularyVisible then
+        vocabularyVisible = false
+        panel.hide(vocabularyWebview, restoreFocus)
+    end
+end
+
+local function createVocabularyWebview()
+    if vocabularyWebview then return end
+    local usercontent = hs.webview.usercontent.new("sttVocabulary")
+        :setCallback(function(msg)
+            if type(msg.body) ~= "table" then return end
+            if msg.body.action == "save" then
+                saveVocabulary(msg.body.text or "")
+            elseif msg.body.action == "close" then
+                hideVocabularyWebview(true)
+            end
+        end)
+    vocabularyWebview = panel.new(VOCABULARY_W, VOCABULARY_H, usercontent, function() hideVocabularyWebview(false) end)
+    vocabularyWebview:html(htmlLoader.load("stt_vocabulary"))
+end
+
+local function toggleVocabularyWebview()
+    if vocabularyVisible then
+        hideVocabularyWebview(true)
+        return
+    end
+    createVocabularyWebview()
+    vocabularyWebview:evaluateJavaScript("if (window.setText) window.setText(" .. hs.json.encode({loadVocabulary()}):sub(2, -2) .. ")")
+    panel.show(vocabularyWebview, VOCABULARY_W, VOCABULARY_H)
+    vocabularyVisible = true
+end
+
 -- ── LLM post-processing ─────────────────────────────────────────
 
 -- Sends rawText to the LLM; callback(content) gets the cleaned text, or nil on any failure
@@ -360,6 +437,12 @@ local function llmRequest(rawText, callback)
     -- Parakeet detects the language itself, so the locale does not apply to it.
     if config.backend == "apple" and sessionLocale then
         prompt = prompt .. " The transcript language is " .. sessionLocale .. "."
+    end
+    if #vocabulary > 0 then
+        prompt = prompt .. " The speaker uses these terms: " .. table.concat(vocabulary, ", ")
+            .. ". This is the one exception to the rule against substituting words: when a word"
+            .. " or phrase in the transcript sounds like one of these terms and the context fits,"
+            .. " write the term with exactly this spelling."
     end
     local payload = hs.json.encode({
         model = config.llm_model,
@@ -1076,14 +1159,18 @@ function M.init(cfg)
 
     historyHotkey = hs.hotkey.bind(config.history_hotkey[1], config.history_hotkey[2], toggleHistoryWebview)
     hs.timer.doAfter(2, createHistoryWebview)
+    vocabularyHotkey = hs.hotkey.bind(config.vocabulary_hotkey[1], config.vocabulary_hotkey[2], toggleVocabularyWebview)
+    loadVocabulary()
 
-    print("STT loaded (toggle: fn+Space, hold: fn+Shift, history: Ctrl+Alt+H)")
+    print("STT loaded (toggle: fn+Space, hold: fn+Shift, history: Ctrl+Alt+H, vocabulary: Ctrl+Alt+W)")
     return M
 end
 
 function M.showHistory()
     showHistoryWebview()
 end
+
+M.toggleVocabulary = toggleVocabularyWebview
 
 function M.stop()
     if state ~= "idle" then sendCommand("stop") end
@@ -1095,6 +1182,9 @@ function M.stop()
     if historyWebview then historyWebview:delete(); historyWebview = nil end
     if historyHotkey then historyHotkey:delete(); historyHotkey = nil end
     historyVisible = false
+    if vocabularyWebview then vocabularyWebview:delete(); vocabularyWebview = nil end
+    if vocabularyHotkey then vocabularyHotkey:delete(); vocabularyHotkey = nil end
+    vocabularyVisible = false
     print("STT stopped")
 end
 

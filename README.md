@@ -13,7 +13,7 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | `hyperduck` | Monitors iCloud file for URLs sent from iPhone, opens them on Mac | — |
 | `battery_indicator` | Shows remaining battery time in menu bar | — |
 | `screen_blur` | Full-screen blur overlay for privacy (downsample trick via `sips`) | Ctrl+Alt+B |
-| `stt` | Local speech-to-text via a daemon with 2 backends (parakeet-mlx or Apple SpeechTranscriber), optional LLM post-processing, audio tones, media pause/resume, and transcription history viewer | fn+Space (toggle) / fn+Shift (hold) / Ctrl+Alt+H (history) |
+| `stt` | Local speech-to-text via a daemon with 2 backends (parakeet-mlx or Apple SpeechTranscriber), optional LLM post-processing, audio tones, media pause/resume, transcription history viewer, and a vocabulary of expected terms for the LLM | fn+Space (toggle) / fn+Shift (hold) / Ctrl+Alt+H (history) / Ctrl+Alt+W (vocabulary) |
 | `clipboard_history` | Clipboard history with search, auto-skips password manager entries, 30-day retention | Ctrl+Alt+V |
 | `mouse_grid` | Keyboard-driven mouse (Mouseless-style): full-screen hint grid for click, right/double click, drag & drop, and scrolling; element hints mode (Shortcat-style, via the Accessibility API); free mode for smooth relative cursor movement | Tap left Cmd (grid) / Double-tap left Cmd (hints) / Tap left Alt (free) |
 | `unified_menu` | Combines Slack Status, Hyperduck, Scratchpad, Screen Blur, Clipboard History, and Keyboard Lock into a single menubar item | — |
@@ -39,6 +39,7 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | fn+Space | Toggle speech-to-text recording (press to start, press again to stop and paste) |
 | fn+Shift | Hold-to-talk speech-to-text (hold both to record, release to stop and paste). With the Apple backend and 2 or more `locales`, a tap (less than 250 ms) switches to the next language |
 | Ctrl+Alt+H | Toggle STT transcription history viewer |
+| Ctrl+Alt+W | Toggle STT vocabulary editor |
 | Ctrl+Alt+V | Toggle clipboard history viewer |
 | Tap left Cmd | Toggle mouse grid overlay (quick press+release of left Cmd alone) |
 | Double-tap left Cmd | Element hints mode (Shortcat-style: labels on clickable UI elements) |
@@ -130,6 +131,7 @@ html/
   slack_status/  — Custom status form
   scratchpad/    — CodeMirror markdown editor
   stt_history/        — Transcription history viewer
+  stt_vocabulary/     — Dictation vocabulary editor
   clipboard_history/  — Clipboard history viewer
 ```
 
@@ -235,6 +237,10 @@ stt.init({
 
 The API uses the OpenAI-compatible chat completions format, so other providers (OpenRouter, Groq, Together, etc.) work by changing `llm_api_url`, `llm_model`, and `llm_api_key`.
 
+#### Vocabulary
+
+Ctrl+Alt+W opens an editor for terms you dictate often, such as product names (DigitalOcean, Vultr). Write one term per line; it saves as you type. The terms go into the LLM prompt, which then corrects words that sound like a term (e.g. "digital lotion" → "DigitalOcean") when the context fits. The list is stored in `~/Library/Mobile Documents/com~apple~CloudDocs/STT/vocabulary.txt` and is read again at each recording start. The transcription models do not use it: Apple SpeechTranscriber ignores contextual strings, and parakeet-mlx has no vocabulary option. Without an LLM API key, the vocabulary has no effect.
+
 #### Transcription History & Audio Backup
 
 Each transcription is appended to an iCloud-synced history file at `~/Library/Mobile Documents/com~apple~CloudDocs/STT/history.txt`. Entries include a UTC timestamp, the raw transcription, and the LLM-polished version (if different). The history file grows indefinitely — clean up manually via Finder if needed.
@@ -281,6 +287,7 @@ The scratchpad, Hyperduck, and GIF Finder modules store files in iCloud Drive:
 - **Hyperduck:** `~/Library/Mobile Documents/com~apple~CloudDocs/Hyperduck/inbox.txt`
 - **GIF Finder:** `~/Library/Mobile Documents/com~apple~CloudDocs/GifFinder/favorites.json` and `recents.json`
 - **STT:** `~/Library/Mobile Documents/com~apple~CloudDocs/STT/history.txt` — append-only transcription history
+- **STT vocabulary:** `~/Library/Mobile Documents/com~apple~CloudDocs/STT/vocabulary.txt` — expected terms, one per line
 - **Clipboard History:** `~/Library/Mobile Documents/com~apple~CloudDocs/ClipboardHistory/history.json` — clipboard entries (30-day retention)
 
 Hyperduck requires an iPhone Shortcut that appends timestamped URLs (`timestamp|url` format) to the inbox file. URLs older than 7 days are automatically purged.
