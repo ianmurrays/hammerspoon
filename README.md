@@ -190,7 +190,7 @@ Logs are written to `~/Library/Logs/stt-daemon.log`.
 
 #### Apple SpeechTranscriber Backend (Optional)
 
-On macOS 26 or later, the daemon can use the on-device Apple SpeechTranscriber in place of `parakeet-mlx`. The daemon records the audio as before and sends it to the `apple-stt` Swift CLI while you speak. The pill shows the last 5 words of the live transcript, and updates approximately once each second. When you stop, Hammerspoon pastes the final text. The Parakeet model does not load with this backend. The backend does not detect the language. It uses the first locale in the `locales` option (default `en-US`).
+On macOS 26 or later, the daemon can use the on-device Apple SpeechTranscriber in place of `parakeet-mlx`. The daemon records the audio as before and sends it to the `apple-stt` Swift CLI while you speak. The pill shows as many of the newest words of the live transcript as fit, and updates approximately once each second. When you stop, Hammerspoon pastes the final text. The Parakeet model does not load with this backend. The backend does not detect the language. It uses the first locale in the `locales` option (default `en-US`).
 
 1. Build the CLI:
    ```bash
@@ -219,7 +219,7 @@ A tap of fn+Shift (less than 250 ms) switches to the next locale and shows it in
 
 #### LLM Post-Processing (Optional)
 
-When a Mistral API key is present in the keychain, transcribed text is sent through the Mistral API to remove filler words, fix punctuation/capitalization, and apply light grammar corrections. The pill overlay shows a purple "Polishing" spinner during this step. If the API call fails or times out (10s), the raw transcription is pasted instead. With the Apple backend, the request also gives the locale of the recording (for example `es-CL`), so that Mistral does not guess the language.
+When a Mistral API key is present in the keychain, transcribed text is sent through the Mistral API to remove filler words, fix punctuation/capitalization, and apply light grammar corrections. The pill overlay shows a purple "Polishing" spinner during this step. If the API call fails or times out (10s), the raw transcription is pasted instead. With the Apple backend, the whole transcript so far is also polished while you speak (one request at a time, the next one starts when the reply arrives), and a panel above the pill shows the latest polished version. When the last live polish covers the final transcript exactly, it is pasted without another request. With the Apple backend, the request also gives the locale of the recording (for example `es-CL`), so that Mistral does not guess the language.
 
 Configuration options in `init.lua`:
 

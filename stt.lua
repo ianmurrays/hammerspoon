@@ -89,6 +89,10 @@ local generation = 0
 local tones = {}
 local mediaWasPlaying = false
 local levelBuf = {}
+-- Live polish: raw (latest transcript), sentRaw (last sent to the LLM), busy,
+-- polished (latest LLM reply), polishedRaw (the transcript that reply was for)
+local live = {}
+local transcriptCanvas = nil
 
 -- History viewer state
 local historyWebview = nil
@@ -99,7 +103,7 @@ local historyVisible = false
 local showPill, updatePill, hideOverlay, renderPill, showPasted
 local connectAndStart, retryConnect, sendCommand, handleMessage
 local pasteText, cleanup, startDaemon, stopDaemon, resetIdleTimer, postProcessText, drawWaveform
-local appendHistory, cleanupWav
+local appendHistory, cleanupWav, livePolish, renderTranscript
 local playTone, pauseMedia, resumeMedia
 local parseHistory, pushHistoryToJS, showHistoryWebview, hideHistoryWebview, toggleHistoryWebview
 
@@ -349,7 +353,8 @@ end
 
 -- ── LLM post-processing ─────────────────────────────────────────
 
-postProcessText = function(rawText, callback)
+-- Sends rawText to the LLM; callback(content) gets the cleaned text, or nil on any failure
+local function llmRequest(rawText, callback)
     local prompt = config.llm_system_prompt
     -- The apple backend knows the language. Tell the LLM, so that it does not guess.
     -- Parakeet detects the language itself, so the locale does not apply to it.
@@ -368,7 +373,25 @@ postProcessText = function(rawText, callback)
         ["Authorization"] = "Bearer " .. config.llm_api_key,
         ["Content-Type"] = "application/json",
     }
+    hs.http.asyncPost(config.llm_api_url, payload, headers, function(status, body, _)
+        if status ~= 200 then
+            print("stt: LLM API error (status=" .. tostring(status) .. ")")
+            callback(nil)
+            return
+        end
+        local ok, resp = pcall(hs.json.decode, body)
+        local content = ok and resp and resp.choices and resp.choices[1]
+            and resp.choices[1].message and resp.choices[1].message.content
+        if not content or #content == 0 then
+            print("stt: LLM response empty or unparseable")
+            callback(nil)
+            return
+        end
+        callback((content:gsub("</?transcript>", ""):match("^%s*(.-)%s*$")))
+    end)
+end
 
+postProcessText = function(rawText, callback)
     local timedOut = false
     if llmTimer then llmTimer:stop() end
     llmTimer = hs.timer.doAfter(config.llm_timeout, function()
@@ -377,34 +400,48 @@ postProcessText = function(rawText, callback)
         print("stt: LLM timeout after " .. config.llm_timeout .. "s, using raw text")
         callback(rawText)
     end)
-
-    hs.http.asyncPost(config.llm_api_url, payload, headers, function(status, body, _)
+    llmRequest(rawText, function(content)
         if timedOut then return end
         if llmTimer then llmTimer:stop(); llmTimer = nil end
+        if content then print("stt: LLM polished (" .. #rawText .. " -> " .. #content .. " chars)") end
+        callback(content or rawText)
+    end)
+end
 
-        if status ~= 200 then
-            print("stt: LLM API error (status=" .. tostring(status) .. "), using raw text")
-            callback(rawText)
-            return
+-- Live polish: while recording, the whole transcript so far goes to the LLM, one request
+-- at a time. When a reply arrives and the transcript has grown, the next request starts.
+-- A request older than llm_timeout is abandoned; after an error the next one waits 2s.
+-- ponytail: back-to-back requests, about one per second while you talk; add a min interval if cost matters
+
+livePolish = function()
+    if live.busy or live.waiting or not live.raw or live.raw == live.sentRaw then return end
+    if not (config.llm_api_key and #config.llm_api_key > 0) then return end
+    live.seq = (live.seq or 0) + 1
+    live.busy, live.sentRaw = true, live.raw
+    local gen, seq, raw = generation, live.seq, live.raw
+    live.watchdog = hs.timer.doAfter(config.llm_timeout, function()
+        if generation ~= gen or live.seq ~= seq or not live.busy then return end
+        print("stt: live polish #" .. seq .. " timed out after " .. config.llm_timeout .. "s")
+        live.busy = false
+        livePolish()
+    end)
+    llmRequest(raw, function(content)
+        if generation ~= gen or live.seq ~= seq then return end
+        if live.watchdog then live.watchdog:stop(); live.watchdog = nil end
+        live.busy = false
+        if state ~= "recording" and state ~= "transcribing" then return end
+        if content then
+            live.polished, live.polishedRaw = content, raw
+            renderTranscript()
+            livePolish()
+        else
+            live.waiting = true
+            hs.timer.doAfter(2, function()
+                if generation ~= gen then return end
+                live.waiting = false
+                livePolish()
+            end)
         end
-
-        local ok, resp = pcall(hs.json.decode, body)
-        if not ok or not resp or not resp.choices or #resp.choices == 0 then
-            print("stt: LLM response parse failed, using raw text")
-            callback(rawText)
-            return
-        end
-
-        local content = resp.choices[1].message and resp.choices[1].message.content
-        if not content or #content == 0 then
-            print("stt: LLM returned empty content, using raw text")
-            callback(rawText)
-            return
-        end
-
-        content = content:gsub("</?transcript>", ""):match("^%s*(.-)%s*$")
-        print("stt: LLM polished (" .. #rawText .. " -> " .. #content .. " chars)")
-        callback(content)
     end)
 end
 
@@ -414,8 +451,10 @@ cleanup = function()
     if connectTimer then connectTimer:stop(); connectTimer = nil end
     if stopTimeout then stopTimeout:stop(); stopTimeout = nil end
     if llmTimer then llmTimer:stop(); llmTimer = nil end
+    if live.watchdog then live.watchdog:stop() end
     mediaWasPlaying = false
     levelBuf = {}
+    live = {}
     state = "idle"
 end
 
@@ -446,7 +485,16 @@ handleMessage = function(data)
     elseif msg.type == "final" then
         if stopTimeout then stopTimeout:stop(); stopTimeout = nil end
         local wavPath = msg.wav_path
-        if config.llm_api_key and #config.llm_api_key > 0 and msg.text and #msg.text > 0 then
+        if live.polished and live.polishedRaw == msg.text then
+            -- The live polish already covers the whole transcript: paste it without another round trip
+            playTone("done")
+            showPasted(live.polished)
+            pasteText(live.polished)
+            appendHistory(msg.text, live.polished)
+            cleanupWav(wavPath)
+            cleanup()
+            resetIdleTimer()
+        elseif config.llm_api_key and #config.llm_api_key > 0 and msg.text and #msg.text > 0 then
             state = "polishing"
             updatePill("polishing")
             local gen = generation
@@ -475,13 +523,17 @@ handleMessage = function(data)
         end
 
     elseif msg.type == "partial" then
-        -- Live transcript (apple backend): show the last 5 words in the pill.
+        -- Live transcript (apple backend): show the newest words that fit in the pill,
+        -- and polish the whole transcript so far for the panel above it.
         if state == "recording" and canvas then
             local words = {}
             for word in msg.text:gmatch("%S+") do words[#words + 1] = word end
             if #words > 0 then
-                pill.live = (#words > 5 and "…" or "") .. table.concat(words, " ", math.max(1, #words - 4))
+                -- 30 words overfill the fixed-width text area, whose truncateHead clips the start with "…"
+                pill.live = table.concat(words, " ", math.max(1, #words - 29))
                 renderPill()
+                live.raw = msg.text:match("^%s*(.-)%s*$") -- trimmed like apple-stt's final text
+                livePolish()
             end
         end
 
@@ -528,10 +580,11 @@ local function fmtElapsed(secs)
 end
 
 -- Layout parts: {w = width, draw = function(x, els) appends elements at x}
-local function textPart(st, maxW)
+-- fixed: always maxW wide (the text is clipped by its paragraph style)
+local function textPart(st, maxW, fixed)
     local size = hs.drawing.getTextDrawingSize(st)
     local w = math.ceil(size.w) + 2
-    if maxW and w > maxW then w = maxW end
+    if maxW and (fixed or w > maxW) then w = maxW end
     local h = math.ceil(size.h)
     return {w = w, draw = function(x, els)
         els[#els + 1] = {type = "text", text = st, frame = {x = x, y = PILL_MID - h / 2, w = w, h = h + 2}}
@@ -646,7 +699,7 @@ renderPill = function()
             add(badgePart((config.locales[localeIndex] or ""):sub(1, 2):upper()))
         end
         if pill.live then
-            add(textPart(styled(pill.live, 13, WHITE, false, true), 240))
+            add(textPart(styled(pill.live, 13, WHITE, false, true), 420, true))
             add(wavePart(6))
         else
             add(wavePart(20))
@@ -674,6 +727,7 @@ renderPill = function()
     local w = padL + padR + gap * (#parts - 1)
     for _, p in ipairs(parts) do w = w + p.w end
     pill.w = w
+    if st == "recording" and pill.live then pill.liveW = w end
 
     pillIdx = {}
     local els = {{
@@ -699,6 +753,56 @@ renderPill = function()
     })
     canvas:replaceElements(els)
     drawWaveform()
+end
+
+-- Polished transcript panel: above the pill, sized to the text, newest text kept when it overflows
+local TRANSCRIPT_W, TRANSCRIPT_MAX_H, TRANSCRIPT_PAD = 640, 300, 20 -- W: before the pill has live text
+renderTranscript = function()
+    if not canvas or not live.polished then return end
+    local W = pill.liveW or TRANSCRIPT_W -- the live pill's fixed width, so the two line up
+    local text = live.polished
+    -- ponytail: tail by characters, not lines; a long dictation scrolls off the top
+    if #text > 900 then text = "…" .. text:sub(-900):gsub("^[^%s]*%s", "") end
+    local attrs = {font = {name = ".AppleSystemUIFont", size = 13}, color = WHITE, paragraphStyle = {lineSpacing = 3}}
+    local st = hs.styledtext.new(text, attrs)
+    local innerW = W - 2 * TRANSCRIPT_PAD
+    if not transcriptCanvas then
+        transcriptCanvas = hs.canvas.new({x = 0, y = 0, w = W + 2 * PILL_MARGIN, h = 1})
+        transcriptCanvas:level(hs.canvas.windowLevels.overlay)
+        transcriptCanvas:behavior({"canJoinAllSpaces", "stationary"})
+    end
+    -- Height from each paragraph's unwrapped width: canvas text measuring does not wrap.
+    -- It never shrinks during a recording, so replies of slightly different length do not jitter it.
+    -- ponytail: 10% slack covers word-wrap waste; an exact layout needs NSLayoutManager
+    local lineH = hs.drawing.getTextDrawingSize(hs.styledtext.new("Ag", attrs)).h
+    local lines = 0
+    for para in (text .. "\n"):gmatch("(.-)\n") do
+        local w = #para > 0 and hs.drawing.getTextDrawingSize(hs.styledtext.new(para, attrs)).w or 0
+        lines = lines + math.max(1, math.ceil(w * 1.1 / innerW))
+    end
+    live.textH = math.min(math.max(live.textH or 0, lines * (lineH + 3)), TRANSCRIPT_MAX_H) -- + lineSpacing
+    local textH = live.textH
+    local h = textH + 2 * TRANSCRIPT_PAD
+    local sf = pill.screen:frame()
+    local pillTop = sf.y + sf.h - PILL_HEIGHT - 40
+    transcriptCanvas:frame({
+        x = sf.x + (sf.w - W) / 2 - PILL_MARGIN,
+        y = pillTop - 12 - h - PILL_MARGIN,
+        w = W + 2 * PILL_MARGIN,
+        h = h + 2 * PILL_MARGIN,
+    })
+    transcriptCanvas:replaceElements({
+        type = "rectangle", action = "strokeAndFill",
+        frame = {x = PILL_MARGIN, y = PILL_MARGIN, w = W, h = h},
+        roundedRectRadii = {xRadius = PILL_HEIGHT / 2, yRadius = PILL_HEIGHT / 2},
+        fillColor = {red = 28 / 255, green = 28 / 255, blue = 30 / 255, alpha = 0.94},
+        strokeColor = {white = 1, alpha = 0.16}, strokeWidth = 1,
+        withShadow = true, shadow = {blurRadius = 24, color = {alpha = 0.35}, offset = {h = -8, w = 0}},
+    }, {
+        type = "text", text = st,
+        frame = {x = PILL_MARGIN + TRANSCRIPT_PAD, y = PILL_MARGIN + TRANSCRIPT_PAD, w = innerW, h = textH + 2},
+    })
+    transcriptCanvas:show()
 end
 
 local function stopPillTimers()
@@ -780,6 +884,7 @@ end
 hideOverlay = function()
     stopPillTimers()
     if canvas then canvas:delete(); canvas = nil end
+    if transcriptCanvas then transcriptCanvas:delete(); transcriptCanvas = nil end
     pillIdx = {}
 end
 
