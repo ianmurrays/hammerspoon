@@ -13,7 +13,7 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | `hyperduck` | Monitors iCloud file for URLs sent from iPhone, opens them on Mac | — |
 | `battery_indicator` | Shows remaining battery time in menu bar | — |
 | `screen_blur` | Full-screen blur overlay for privacy (downsample trick via `sips`) | Ctrl+Alt+B |
-| `stt` | Local speech-to-text via a daemon with 2 backends (parakeet-mlx or Apple SpeechTranscriber), optional LLM post-processing, audio tones, media pause/resume, transcription history viewer, and a settings panel for vocabulary and per-app LLM styles | fn+Space (toggle) / fn+Shift (hold) / Ctrl+Alt+H (history) / Ctrl+Alt+W (settings) |
+| `stt` | Local speech-to-text via a daemon with 2 backends (parakeet-mlx or Apple SpeechTranscriber), optional LLM post-processing, audio tones, media pause/resume, transcription history viewer, and a settings panel for vocabulary and per-app LLM styles | fn+Space (toggle) / fn+Shift (hold; +Ctrl also presses Return) / Ctrl+Alt+H (history) / Ctrl+Alt+W (settings) |
 | `clipboard_history` | Clipboard history with search, auto-skips password manager entries, 30-day retention | Ctrl+Alt+V |
 | `mouse_grid` | Keyboard-driven mouse (Mouseless-style): full-screen hint grid for click, right/double click, drag & drop, and scrolling; element hints mode (Shortcat-style, via the Accessibility API); free mode for smooth relative cursor movement | Tap left Cmd (grid) / Double-tap left Cmd (hints) / Tap left Alt (free) |
 | `unified_menu` | Combines Slack Status, Hyperduck, Scratchpad, Screen Blur, Clipboard History, and Keyboard Lock into a single menubar item | — |
@@ -38,7 +38,7 @@ Personal Hammerspoon configuration for macOS automation — window management, S
 | Ctrl+Alt+G | Toggle GIF finder |
 | Ctrl+Alt+B | Toggle screen blur overlay (also dismisses on click or any keypress) |
 | fn+Space | Toggle speech-to-text recording (press to start, press again to stop and paste) |
-| fn+Shift | Hold-to-talk speech-to-text (hold both to record, release to stop and paste). With the Apple backend and 2 or more `locales`, a tap (less than 250 ms) switches to the next language |
+| fn+Shift | Hold-to-talk speech-to-text (hold both to record, release to stop and paste). Hold Ctrl too to also press Return after the paste: the pill shows ↵ while Ctrl is held, and letting go of Ctrl more than 200 ms before fn or Shift cancels it. With the Apple backend and 2 or more `locales`, a tap (less than 250 ms) switches to the next language |
 | Ctrl+Alt+H | Toggle STT transcription history viewer |
 | Ctrl+Alt+W | Toggle STT settings (vocabulary, per-app styles) |
 | Ctrl+Alt+V | Toggle clipboard history viewer |

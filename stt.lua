@@ -88,6 +88,8 @@ local eventTap = nil
 local fnShiftHeld = false
 local fnShiftDownAt = 0        -- event timestamp (ns) of the last fn+shift press
 local fnShiftStarted = false   -- the last fn+shift press started a session
+local submitAfterPaste = false -- ctrl is (was) held with fn+shift: press Return after pasting
+local ctrlUpTimer = nil        -- clears submitAfterPaste a moment after ctrl comes up
 local localeIndex = 1          -- index into config.locales
 local sessionLocale = nil      -- locale sent with the last "start" command
 local animTimer = nil
@@ -259,7 +261,9 @@ deliverText = function(text)
     local d = deliver
     deliver = nil
     if not text or #text == 0 then text = nil end
-    if d then d(text) else pasteText(text) end
+    if d then d(text) return end
+    pasteText(text)
+    if text and submitAfterPaste then hs.eventtap.keyStroke({}, "return") end
 end
 
 appendHistory = function(rawText, polishedText)
@@ -597,6 +601,7 @@ cleanup = function()
     print("stt: cleanup()")
     -- A recording that ends without a transcript tells its destination it was discarded
     if deliver then local d = deliver; deliver = nil; d(nil) end
+    submitAfterPaste = false
     if autoStop then autoStop.timer:stop(); autoStop = nil end
     if sock then pcall(function() sock:disconnect() end); sock = nil end
     if connectTimer then connectTimer:stop(); connectTimer = nil end
@@ -867,6 +872,7 @@ renderPill = function()
         end
         local app = config.llm_api_key and activeAppStyle()
         if app then add(badgePart(app.name)) end
+        if submitAfterPaste then add(badgePart("↵")) end
         if pill.live then
             add(textPart(styled(pill.live, 13, WHITE, false, true), 420, true))
             add(wavePart(6))
@@ -878,12 +884,14 @@ renderPill = function()
     elseif st == "transcribing" then
         add(spinnerPart({white = 1, alpha = 0.85}, {white = 1, alpha = 0.18}))
         add(textPart(styled("Transcribing", 13, WHITE)))
+        if submitAfterPaste then add(badgePart("↵")) end
         add(textPart(styled(fmtElapsed(elapsed), 12, DIMMER, true)))
         add(buttonPart(false))
     elseif st == "polishing" then
         stroke = {hex = "#BF5AF2", alpha = 0.45}
         add(spinnerPart(PURPLE, {hex = "#BF5AF2", alpha = 0.25}))
         add(textPart(styled("Polishing", 13, PURPLE_TEXT)))
+        if submitAfterPaste then add(badgePart("↵")) end
         local app = activeAppStyle()
         if app then add(badgePart(app.name)) end
         add(textPart(styled((config.llm_model:gsub("%-latest$", "")), 12, DIMMER)))
@@ -905,7 +913,7 @@ renderPill = function()
     elseif st == "done" then
         padL, padR, gap = 12, 16, 8
         add(checkPart())
-        add(textPart(styled("Pasted", 13, WHITE)))
+        add(textPart(styled(pill.submitted and "Sent" or "Pasted", 13, WHITE)))
         add(textPart(styled(pill.words .. (pill.words == 1 and " word" or " words"), 12, DIMMER)))
     end
 
@@ -1063,6 +1071,7 @@ showPasted = function(text)
     for _ in (text or ""):gmatch("%S+") do n = n + 1 end
     if not canvas or n == 0 then hideOverlay(); return end
     pill.words = n
+    pill.submitted = submitAfterPaste and not deliver
     updatePill("done")
     doneTimer = hs.timer.doAfter(0.8, hideOverlay)
 end
@@ -1245,6 +1254,7 @@ function M.init(cfg)
 
     -- fn+space: toggle dictation
     -- fn+shift: hold-to-talk (hold both to record, release either to stop).
+    --           Ctrl held when fn or Shift is released also presses Return after the paste.
     --           With the apple backend and 2 or more locales, a tap (release in
     --           less than 250 ms) switches to the next locale and discards the recording.
     fnShiftHeld = false
@@ -1281,17 +1291,33 @@ function M.init(cfg)
             -- fn+shift → hold-to-talk
             if evType == hs.eventtap.event.types.flagsChanged then
                 local bothHeld = flags.fn and flags.shift
-                                 and not flags.cmd and not flags.alt and not flags.ctrl
+                                 and not flags.cmd and not flags.alt
                 if bothHeld and not fnShiftHeld then
                     fnShiftHeld = true
                     -- The event timestamp is not affected by the time that
                     -- connectAndStart() spends in the synchronous media check.
                     fnShiftDownAt = eventTime(event)
                     fnShiftStarted = state == "idle"
+                    submitAfterPaste = false
                     print("stt: fn+shift held, state=" .. state)
                     if fnShiftStarted then connectAndStart() end
+                end
+                if bothHeld and fnShiftStarted then
+                    -- Ctrl decides, up to the release of fn or Shift. Letting go of it
+                    -- counts only after 200 ms, so releasing all three keys at once still submits.
+                    if flags.ctrl then
+                        if ctrlUpTimer then ctrlUpTimer:stop(); ctrlUpTimer = nil end
+                        if not submitAfterPaste then submitAfterPaste = true; renderPill() end
+                    elseif submitAfterPaste and not ctrlUpTimer then
+                        ctrlUpTimer = hs.timer.doAfter(0.2, function()
+                            ctrlUpTimer = nil
+                            submitAfterPaste = false
+                            renderPill()
+                        end)
+                    end
                 elseif not bothHeld and fnShiftHeld then
                     fnShiftHeld = false
+                    if ctrlUpTimer then ctrlUpTimer:stop(); ctrlUpTimer = nil end
                     print("stt: fn+shift released, state=" .. state)
                     local isTap = config.backend == "apple" and #config.locales > 1
                                   and (eventTime(event) - fnShiftDownAt) < 250e6
